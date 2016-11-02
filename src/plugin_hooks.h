@@ -232,4 +232,8 @@ EXT void amqp_plugin(int, struct configuration *, void *);
 #ifdef WITH_KAFKA
 EXT void kafka_plugin(int, struct configuration *, void *);
 #endif
+
+#ifdef WITH_PCAP_FIFO
+EXT void pcap_fifo_plugin(int, struct configuration *, void *);
+#endif
 #undef EXT

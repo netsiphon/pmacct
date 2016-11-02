@@ -44,6 +44,8 @@
 #include "ip_flow.h"
 #include "classifier.h"
 #include "jhash.h"
+#include "sflow.h"
+#include "sfacctd.h"
 #if defined HAVE_DLOPEN
 #include <dlfcn.h>
 #endif
@@ -106,7 +108,7 @@ void init_classifiers(char *path)
   }
 }
 
-pm_class_t SF_evaluate_classifiers(char *string)
+/*pm_class_t SF_evaluate_classifiers(char *string)
 {
   int j = 0, max = pmct_get_num_entries();
 
@@ -116,6 +118,92 @@ pm_class_t SF_evaluate_classifiers(char *string)
   }
 
   return 0;
+}*/
+
+void SF_evaluate_classifiers(struct packet_ptrs *pptrs, struct ip_flow_common *fp, unsigned int idx)
+{
+  struct pkt_classifier_data data;
+  int plen = (config.snaplen ? config.snaplen : DEFAULT_SNAPLEN);
+  unsigned int reverse = idx ? 0 : 1;
+  char payload[plen+1];
+  int j = 0, ret, cidx;
+  int max = pmct_get_num_entries();
+  void *cc_node = NULL, *cc_rev_node = NULL, *context = NULL;
+  
+  SFSample *sample = (SFSample *) pptrs->f_data;
+  
+  
+  SF_prepare_classifier_data(&data, fp, idx, pptrs);
+  if (pptrs->new_flow) {
+    init_class_accumulators(pptrs, fp, idx);
+  }
+  
+  /* Short circuit: a) if we have a class; b) if we have no more
+     tentatives to classify the packet. Otherwise continue 
+  if (fp->class[idx] || !fp->cst[idx].tentatives) {
+    pptrs->class = fp->class[idx];
+    handle_class_accumulators(pptrs, fp, idx);
+
+    /* do we have an helper ? If yes, let's run it ! 
+    //if (fp->conntrack_helper) fp->conntrack_helper(fp->last[idx].tv_sec, pptrs);
+
+    return;
+   }*/
+   
+   
+   
+   
+  /* We will pre-process the payload section of the snapshot */
+  if (pptrs->f_data) {
+	int caplen, x = 0, y = 0;
+	pptrs->payload_ptr = sample->header + sample->offsetToPayload;
+	caplen = sample->headerLen - sample->offsetToPayload;
+	while (x < caplen && y < plen) {
+	  if (pptrs->payload_ptr[x] != '\0') {
+		if (isascii(pptrs->payload_ptr[x])) payload[y] = tolower(pptrs->payload_ptr[x]);
+	  else payload[y] = pptrs->payload_ptr[x];
+		y++;
+	  }
+	  x++;
+	}
+	payload[y] = '\0';
+	
+	/*if (strlen(payload) < 2 ){
+		return;
+	}*/
+	
+    while (class[j].id && j < max) {
+      if (class[j].pattern) ret = regexec(class[j].pattern, payload);
+      else if (*class[j].func) {
+	cc_node = search_context_chain(fp, idx, class[j].protocol);
+	cc_rev_node = search_context_chain(fp, reverse, class[j].protocol);
+	context = cc_node;
+	ret = (*class[j].func)(&data, caplen, &context, &cc_rev_node, &class[j].extra);
+	if (context && !cc_node) insert_context_chain(fp, idx, class[j].protocol, context);
+      }
+
+      if (ret) {
+        if (ret > 1 && ret < max && class[ret-1].id) cidx = ret-1;
+	else cidx = j;
+
+        fp->class[0] = class[cidx].id;
+        fp->class[1] = class[cidx].id;
+        pptrs->class = class[cidx].id;
+	handle_class_accumulators(pptrs, fp, idx);
+	if (class[cidx].ct_helper) {
+	  fp->conntrack_helper = class[cidx].ct_helper;
+	  fp->conntrack_helper(fp->last[idx].tv_sec, pptrs); 
+	}
+	else fp->conntrack_helper = NULL;
+        return;
+      }
+      j++;
+    }
+  }
+
+  fp->class[idx] = FALSE;
+  pptrs->class = FALSE;
+  handle_class_accumulators(pptrs, fp, idx);
 }
 
 void evaluate_classifiers(struct packet_ptrs *pptrs, struct ip_flow_common *fp, unsigned int idx)
@@ -127,7 +215,8 @@ void evaluate_classifiers(struct packet_ptrs *pptrs, struct ip_flow_common *fp, 
   int j = 0, ret, cidx;
   int max = pmct_get_num_entries();
   void *cc_node = NULL, *cc_rev_node = NULL, *context = NULL;
-
+ 
+  
   prepare_classifier_data(&data, fp, idx, pptrs);
   if (pptrs->new_flow) {
     init_class_accumulators(pptrs, fp, idx);
@@ -144,22 +233,44 @@ void evaluate_classifiers(struct packet_ptrs *pptrs, struct ip_flow_common *fp, 
     if (fp->conntrack_helper) fp->conntrack_helper(fp->last[idx].tv_sec, pptrs);
 
     return;
-  }
-
+   }
+   
+   
+    
+  SFSample *sample = (SFSample *) pptrs->f_data;
+  
+   
   /* We will pre-process the payload section of the snapshot */
-  if (pptrs->payload_ptr) {
-    int caplen = ((struct pcap_pkthdr *)pptrs->pkthdr)->caplen - (pptrs->payload_ptr - pptrs->packet_ptr), x = 0, y = 0;
- 
-    while (x < caplen && y < plen) {
-      if (pptrs->payload_ptr[x] != '\0') {
-        if (isascii(pptrs->payload_ptr[x])) payload[y] = tolower(pptrs->payload_ptr[x]);
-	else payload[y] = pptrs->payload_ptr[x];
-	y++;
-      }
-      x++;
-    }
-    payload[y] = '\0';
+  if (pptrs->payload_ptr || pptrs->f_data) { 
+	int caplen, x = 0, y = 0;
+	
+	u_char *sflow_pkt_ptr = sample->header + sample->offsetToPayload;
+	if (pptrs->f_data) {
+		caplen = sample->headerLen - ((sample->header + sample->offsetToPayload) - sample->header);
+		while (x < caplen && y < plen) {
+		  if (sflow_pkt_ptr[x] != '\0') {
+			if (isascii(sflow_pkt_ptr[x])) payload[y] = tolower(sflow_pkt_ptr[x]);
+		  else payload[y] = sflow_pkt_ptr[x];
+			y++;
+		  }
+		  x++;
+		}
+		payload[y] = '\0';
 
+	} else { 
+		caplen = ((struct pcap_pkthdr *)pptrs->pkthdr)->caplen - (pptrs->payload_ptr - pptrs->packet_ptr);
+		while (x < caplen && y < plen) {
+		  if (pptrs->payload_ptr[x] != '\0') {
+			if (isascii(pptrs->payload_ptr[x])) payload[y] = tolower(pptrs->payload_ptr[x]);
+		  else payload[y] = pptrs->payload_ptr[x];
+			y++;
+		  }
+		  x++;
+		}
+		payload[y] = '\0';
+	
+	}
+	
     while (class[j].id && j < max) {
       if (class[j].pattern) ret = pm_regexec(class[j].pattern, payload);
       else if (*class[j].func) {
@@ -587,6 +698,27 @@ void clear_context_chain(struct ip_flow_common *fp, unsigned int idx)
   }
 
   fp->cc[idx] = NULL;
+}
+
+
+void SF_prepare_classifier_data(struct pkt_classifier_data *data,
+				struct ip_flow_common *fp,
+				unsigned int idx,
+				struct packet_ptrs *pptrs)
+{
+
+  SFSample *sample = (SFSample *) pptrs->f_data;
+  data->stamp.tv_sec = 0;
+  data->stamp.tv_usec = 0;
+  data->packet_ptr = sample->header;
+  data->l3_ptr = sample->header + sample->offsetToIPV4;
+  data->l4_ptr = sample->header + (sample->offsetToPayload - sample->offsetToIPV4);
+  data->payload_ptr = sample->header + sample->offsetToPayload;
+  data->l3_proto = sample->headerProtocol;
+  data->l4_proto = sample->dcd_ipProtocol;
+  data->plen = sample->headerLen - ((sample->header + sample->offsetToPayload) - sample->header); 
+  data->tentatives = fp->cst[idx].tentatives;
+  data->sampling_rate = 1;
 }
 
 void prepare_classifier_data(struct pkt_classifier_data *data,

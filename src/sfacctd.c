@@ -588,7 +588,7 @@ int main(int argc,char **argv, char **envp)
     }
     Log(LOG_INFO, "INFO ( %s/core ): sfacctd_pipe_size: obtained=%d target=%d.\n", config.name, obtained, config.nfacctd_pipe_size);
   }
-
+  
   /* Multicast: memberships handling */
   for (idx = 0; mcast_groups[idx].family && idx < MAX_MCAST_GROUPS; idx++) {
     if (mcast_groups[idx].family == AF_INET) {
@@ -1098,6 +1098,7 @@ int main(int argc,char **argv, char **envp)
       process_SF_raw_packet(&spp, &pptrs, &req, (struct sockaddr *) &client);
     }
   }
+  //close_pcap_fifo(&fifo_socket);
 }
 
 void InterSampleCleanup(SFSample *spp)
@@ -1364,6 +1365,9 @@ void compute_once()
   SFrenormEntrySz = sizeof(struct xflow_status_entry_sampling);
   PptrsSz = sizeof(struct packet_ptrs);
   CSSz = sizeof(struct class_st);
+  
+  IpFlowCmnSz = sizeof(struct ip_flow_common);
+  
   HostAddrSz = sizeof(struct host_addr);
   UDPHdrSz = sizeof(struct my_udphdr);
 
@@ -1399,7 +1403,8 @@ void finalizeSample(SFSample *sample, struct packet_ptrs_vector *pptrsv, struct 
 
   /* check for out_vlan */
   if (!vlan && sample->out_vlan) vlan = htons(sample->out_vlan); 
-
+  struct ip_flow_common *dummyfp = malloc(sizeof(struct ip_flow_common));
+  memset(dummyfp,0,sizeof(struct ip_flow_common));
   /*
      We consider packets if:
      - sample->gotIPV4 || sample->gotIPV6 : it belongs to either an IPv4 or IPv6 packet.
@@ -1765,6 +1770,44 @@ void finalizeSample(SFSample *sample, struct packet_ptrs_vector *pptrsv, struct 
     default:
       break;
     }
+	
+		
+	/* Classifiers BETA =======================*/
+	struct timezone tz;
+	dummyfp->bucket = 0;
+	dummyfp->last_tcp_seq = 0;
+	//gettimeofday(dummyfp->last, &tz);
+	//dummyfp->last = time(NULL);
+	
+	dummyfp->proto = sample->dcd_ipProtocol;
+	//dummyfp->
+	SF_evaluate_classifiers(pptrs, dummyfp, 1);
+	
+	
+	/*PCAP FIFO ALPHA
+	if (config.pcap_fifo && *fifo_socket < 0) {
+	
+		init_pcap_fifo(fifo_name,fifo_socket);
+	
+	}
+	
+	if (config.pcap_fifo && *fifo_socket > 0) {
+		char fifo_output[2048];
+		int fifo_bytes;
+		
+		memset(fifo_output,0,sizeof(fifo_output));
+		memset(&fifo_bytes,0,sizeof(fifo_bytes));
+		
+		//strlcpy(fifo_output, "test the packets", 17);
+		//fifo_bytes = strlen(fifo_output);
+		writePcapPacket(sample, &fifo_bytes, fifo_output);
+		if (write_to_pcap_fifo(fifo_output, fifo_socket, &fifo_bytes) == -1) {
+			
+		}
+		
+	}*/
+
+	
   }
 }
 
@@ -2393,3 +2436,4 @@ void sf_cnt_link_misc_structs(struct bgp_misc_structs *bms)
 
   /* dump not supported */
 }
+

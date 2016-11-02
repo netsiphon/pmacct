@@ -861,6 +861,16 @@ int main(int argc,char **argv)
 	  count_token_int[count_index] = COUNT_INT_SAMPLING_RATE;
 	  what_to_count_2 |= COUNT_SAMPLING_RATE;
 	}
+	
+	  
+	  
+	  
+	 
+	  else if (!strcmp(count_token[count_index], "packet_payload")) {
+	  count_token_int[count_index] = COUNT_PACKET_PAYLOAD;
+	  what_to_count |= COUNT_PACKET_PAYLOAD;
+	}
+	
         else if (!strcmp(count_token[count_index], "none")) {
 	  count_token_int[count_index] = COUNT_INT_NONE;
 	  what_to_count |= COUNT_NONE;
@@ -1553,6 +1563,16 @@ int main(int argc,char **argv)
 	else if (!strcmp(count_token[match_string_index], "sampling_rate")) {
 	  request.data.sampling_rate = atoi(match_string_token);
 	}
+	
+	
+	  
+	  
+	  
+	  
+	
+	
+	
+	
         else if (!strcmp(count_token[match_string_index], "proto")) {
 	  int proto;
 

@@ -455,6 +455,10 @@ int main(int argc,char **argv, char **envp)
 	list->cfg.what_to_count |= COUNT_SRC_PORT;
 	list->cfg.what_to_count |= COUNT_DST_PORT;
 	list->cfg.what_to_count |= COUNT_IP_TOS;
+	
+	
+	list->cfg.what_to_count |= COUNT_PACKET_PAYLOAD;
+	
 	list->cfg.what_to_count |= COUNT_IP_PROTO;
 	if (list->cfg.networks_file || (list->cfg.nfacctd_bgp && list->cfg.nfacctd_as == NF_AS_BGP)) {
 	  list->cfg.what_to_count |= COUNT_SRC_AS;

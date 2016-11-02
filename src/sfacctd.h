@@ -95,6 +95,9 @@ typedef struct _SFSample {
   int offsetToIPV4;
   int gotIPV6;
   int offsetToIPV6;
+  
+  int offsetToPayload;
+  
   struct in_addr dcd_srcIP;
   struct in_addr dcd_dstIP;
   u_int32_t dcd_ipProtocol;
@@ -259,6 +262,31 @@ struct SF_dissect {
   u_int32_t *samplesInPkt;
 };
 
+/* tcpdump file format */
+
+//struct pcap_my_file_header {
+  //u_int32_t magic;
+  //u_int16_t version_major;
+  //u_int16_t version_minor;
+  //u_int32_t thiszone;	/* gmt to local correction */
+  //u_int32_t sigfigs;	/* accuracy of timestamps */
+  //u_int32_t snaplen;	/* max length saved portion of each pkt */
+  //u_int32_t linktype;	/* data link type (DLT_*) */
+  //};
+
+//struct pcap_my_pkthdr {
+  //struct timeval ts;	/* time stamp */
+  //u_int32_t caplen;	/* length of portion present */
+  //u_int32_t len;	/* length this packet (off wire) */
+  /* some systems expect to see more information here. For example,
+   * on some versions of RedHat Linux, there are three extra fields:
+   *   int index;
+   *   unsigned short protocol;
+   *   unsigned char pkt_type;
+   * To pad the header with zeros, use the tcpdumpHdrPad option.
+   */
+//};
+
 #if (!defined __SFACCTD_C)
 #define EXT extern
 #else
@@ -280,6 +308,12 @@ EXT u_int64_t getData64(SFSample *);
 EXT u_int32_t getAddress(SFSample *, SFLAddress *);
 EXT void skipBytes(SFSample *, int);
 EXT int lengthCheck(SFSample *, u_char *, int);
+
+//EXT char fifo_name[256];
+//EXT int *fifo_socket;
+//EXT FILE *fifo_stream;
+//EXT int fifo_header;
+
 
 EXT void process_SFv2v4_packet(SFSample *, struct packet_ptrs_vector *, struct plugin_requests *, struct sockaddr *);
 EXT void process_SFv5_packet(SFSample *, struct packet_ptrs_vector *, struct plugin_requests *, struct sockaddr *);

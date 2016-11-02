@@ -1106,7 +1106,8 @@ int sql_evaluate_primitives(int primitive)
 
     if (config.what_to_count & COUNT_SUM_PORT) what_to_count |= COUNT_SUM_PORT;
 
-    what_to_count |= COUNT_SRC_PORT|COUNT_DST_PORT|COUNT_TCPFLAGS|COUNT_IP_PROTO|COUNT_CLASS|COUNT_VLAN|COUNT_IP_TOS;
+    //what_to_count |= COUNT_SRC_PORT|COUNT_DST_PORT|COUNT_TCPFLAGS|COUNT_IP_PROTO|COUNT_CLASS|COUNT_VLAN|COUNT_IP_TOS;
+    what_to_count |= COUNT_SRC_PORT|COUNT_DST_PORT|COUNT_IP_PROTO|COUNT_CLASS|COUNT_VLAN|COUNT_IP_TOS|COUNT_PACKET_PAYLOAD|COUNT_PACKET_HEADER|COUNT_UNIQUE_PACKET;
 
     if (config.what_to_count & COUNT_SRC_HOST) what_to_count |= COUNT_SRC_HOST;
     else if (config.what_to_count & COUNT_SUM_HOST) what_to_count |= COUNT_SUM_HOST;
@@ -2109,7 +2110,91 @@ int sql_evaluate_primitives(int primitive)
       primitive++;
     }
   }
+  
+   if (what_to_count & COUNT_PACKET_PAYLOAD) {
+    int count_it = FALSE;
 
+    if ((config.sql_table_version < 7) && !assume_custom_table) {
+      if (config.what_to_count & COUNT_PACKET_PAYLOAD) {
+        Log(LOG_ERR, "ERROR ( %s/%s ): The use of packet_payload requires SQL table v7. Exiting.\n", config.name, config.type);
+        exit_plugin(1);
+      }
+      else what_to_count ^= COUNT_PACKET_PAYLOAD;
+    }
+    else count_it = TRUE;
+
+    if (count_it) {
+      if (primitive) {
+        strncat(insert_clause, ", ", SPACELEFT(insert_clause));
+        strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+        strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
+      }
+
+      strncat(insert_clause, "packet_payload", SPACELEFT(insert_clause));
+      strncat(values[primitive].string, "\'%s\'", SPACELEFT(values[primitive].string));
+      strncat(where[primitive].string, "packet_payload=\'%s\'", SPACELEFT(where[primitive].string));
+      values[primitive].type = where[primitive].type = COUNT_PACKET_PAYLOAD;
+      values[primitive].handler = where[primitive].handler = count_packet_payload_handler;
+      primitive++;
+    }
+  }
+  
+   if (what_to_count & COUNT_PACKET_HEADER) {
+    int count_it = FALSE;
+
+    if ((config.sql_table_version < 7) && !assume_custom_table) {
+      if (config.what_to_count & COUNT_PACKET_HEADER) {
+        Log(LOG_ERR, "ERROR ( %s/%s ): The use of packet_header requires SQL table v7. Exiting.\n", config.name, config.type);
+        exit_plugin(1);
+      }
+      else what_to_count ^= COUNT_PACKET_HEADER;
+    }
+    else count_it = TRUE;
+
+    if (count_it) {
+      if (primitive) {
+        strncat(insert_clause, ", ", SPACELEFT(insert_clause));
+        strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+        strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
+      }
+
+      strncat(insert_clause, "packet_header", SPACELEFT(insert_clause));
+      strncat(values[primitive].string, "\'%s\'", SPACELEFT(values[primitive].string));
+      strncat(where[primitive].string, "packet_header=\'%s\'", SPACELEFT(where[primitive].string));
+      values[primitive].type = where[primitive].type = COUNT_PACKET_HEADER;
+      values[primitive].handler = where[primitive].handler = count_packet_header_handler;
+      primitive++;
+    }
+  }
+  
+  if (what_to_count & COUNT_UNIQUE_PACKET) {
+    int count_it = FALSE;
+
+    if ((config.sql_table_version < 7) && !assume_custom_table) {
+      if (config.what_to_count & COUNT_UNIQUE_PACKET) {
+        Log(LOG_ERR, "ERROR ( %s/%s ): The use of unique requires SQL table v7. Exiting.\n", config.name, config.type);
+        exit_plugin(1);
+      }
+      else what_to_count ^= COUNT_UNIQUE_PACKET;
+    }
+    else count_it = TRUE;
+
+    if (count_it) {
+      if (primitive) {
+        strncat(insert_clause, ", ", SPACELEFT(insert_clause));
+        strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+        strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
+      }
+
+      strncat(insert_clause, "unique_packet", SPACELEFT(insert_clause));
+      strncat(values[primitive].string, "%u", SPACELEFT(values[primitive].string));
+      strncat(where[primitive].string, "unique_packet=%u", SPACELEFT(where[primitive].string));
+      values[primitive].type = where[primitive].type = COUNT_UNIQUE_PACKET;
+      values[primitive].handler = where[primitive].handler = count_unique_packet_handler;
+      primitive++;
+    }
+  }
+  
   if (what_to_count & COUNT_IP_PROTO) {
     int count_it = FALSE;
 

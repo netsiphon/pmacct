@@ -196,6 +196,9 @@ int cfg_key_aggregate(char *filename, char *name, char *value_ptr)
     else if (!strcmp(count_token, "src_port")) cfg_set_aggregate(filename, value, COUNT_INT_SRC_PORT, count_token);
     else if (!strcmp(count_token, "dst_port")) cfg_set_aggregate(filename, value, COUNT_INT_DST_PORT, count_token);
     else if (!strcmp(count_token, "proto")) cfg_set_aggregate(filename, value, COUNT_INT_IP_PROTO, count_token);
+    else if (!strcmp(count_token, "packet_payload")) cfg_set_aggregate(filename, value, COUNT_PACKET_PAYLOAD, count_token);
+    else if (!strcmp(count_token, "packet_header")) cfg_set_aggregate(filename, value, COUNT_PACKET_HEADER, count_token);
+    else if (!strcmp(count_token, "unique_packet")) cfg_set_aggregate(filename, value, COUNT_UNIQUE_PACKET, count_token);
 #if defined (HAVE_L2)
     else if (!strcmp(count_token, "src_mac")) cfg_set_aggregate(filename, value, COUNT_INT_SRC_MAC, count_token);
     else if (!strcmp(count_token, "dst_mac")) cfg_set_aggregate(filename, value, COUNT_INT_DST_MAC, count_token);
@@ -7138,3 +7141,22 @@ int cfg_key_telemetry_dump_kafka_partition_key(char *filename, char *name, char 
 
   return changes;
 }
+
+int cfg_key_pcap_fifo_path(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0;
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.pcap_fifo_path = value_ptr;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+        list->cfg.pcap_fifo_path = value_ptr;
+        changes++;
+        break;
+      }
+    }
+  }
+  return changes;
+}
+

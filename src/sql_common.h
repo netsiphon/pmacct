@@ -31,6 +31,7 @@
 #undef __PLUGIN_COMMON_EXPORT
 #endif /* #if (!defined __SQL_COMMON_EXPORT) */
 
+
 /* defines */
 #define DEFAULT_DB_REFRESH_TIME 60
 #define DEFAULT_SQL_TABLE_VERSION 1
@@ -269,6 +270,9 @@ EXT void count_export_proto_seqno_handler(const struct db_cache *, struct insert
 EXT void count_export_proto_version_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
 EXT void count_timestamp_max_residual_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
 EXT void count_custom_primitives_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
+EXT void count_packet_payload_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
+EXT void count_packet_header_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
+EXT void count_unique_packet_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
 EXT void fake_mac_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
 EXT void fake_host_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
 EXT void fake_as_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
@@ -353,19 +357,19 @@ EXT void sql_sum_ext_comm_insert(struct primitives_ptrs *, struct insert_data *)
 #endif
 
 /* Global Variables: a simple way of gain precious speed when playing with strings */
-EXT char sql_data[LARGEBUFLEN];
+EXT char sql_data[UBERLARGEBUFLEN];
 EXT char lock_clause[LONGSRVBUFLEN];
 EXT char unlock_clause[LONGSRVBUFLEN];
-EXT char update_clause[LONGSRVBUFLEN];
-EXT char set_clause[LONGSRVBUFLEN];
-EXT char copy_clause[LONGSRVBUFLEN];
-EXT char insert_clause[LONGSRVBUFLEN];
+EXT char update_clause[LONGLONGSRVBUFLEN];
+EXT char set_clause[LONGLONGSRVBUFLEN];
+EXT char copy_clause[LONGLONGSRVBUFLEN];
+EXT char insert_clause[LONGLONGSRVBUFLEN];
 EXT char insert_counters_clause[LONGSRVBUFLEN];
 EXT char insert_nocounters_clause[LONGSRVBUFLEN];
-EXT char insert_full_clause[LONGSRVBUFLEN];
-EXT char values_clause[LONGLONGSRVBUFLEN];
+EXT char insert_full_clause[LONGLONGSRVBUFLEN];
+EXT char values_clause[UBERLARGEBUFLEN];
 EXT char *multi_values_buffer;
-EXT char where_clause[LONGLONGSRVBUFLEN];
+EXT char where_clause[UBERLARGEBUFLEN];
 EXT unsigned char *pipebuf;
 EXT struct db_cache *cache;
 EXT struct db_cache **queries_queue, **pending_queries_queue;
@@ -384,6 +388,10 @@ EXT time_t glob_new_basetime; /* last resort for signal handling */
 EXT time_t glob_committed_basetime; /* last resort for signal handling */
 EXT int glob_dyn_table; /* last resort for signal handling */
 EXT int glob_timeslot; /* last resort for sql handlers */
+EXT char *fasthex(u_char *, int);
+EXT void print_payload(const u_char *, int);
+EXT char btoh(const u_char *, int);
+EXT void print_hex_ascii_line(const u_char *payload, int len, int offset);
 
 EXT struct sqlfunc_cb_registry sqlfunc_cbr; 
 EXT void (*insert_func)(struct primitives_ptrs *, struct insert_data *);

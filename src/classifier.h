@@ -33,6 +33,7 @@
 /* data structures */
 struct pkt_classifier_data {
   struct timeval stamp;
+  u_char *f_data;
   u_char *packet_ptr;
   u_char *l3_ptr;
   u_char *l4_ptr;
@@ -64,7 +65,9 @@ struct pkt_classifier {
 /* prototypes */
 EXT void init_classifiers(char *);
 EXT void evaluate_classifiers(struct packet_ptrs *, struct ip_flow_common *, unsigned int);
-EXT pm_class_t SF_evaluate_classifiers(char *);
+//EXT pm_class_t SF_evaluate_classifiers(char *);
+EXT void SF_evaluate_classifiers(struct packet_ptrs *, struct ip_flow_common *, unsigned int);
+EXT void SF_prepare_classifier_data(struct pkt_classifier_data *, struct ip_flow_common *, unsigned int, struct packet_ptrs *);
 EXT int parse_pattern_file(char *, struct pkt_classifier *);
 EXT int parse_shared_object(char *, struct pkt_classifier *);
 EXT int dot_pat(char *);
@@ -78,6 +81,7 @@ EXT void link_conntrack_helper(struct pkt_classifier *);
 EXT void *search_context_chain(struct ip_flow_common *, unsigned int, char *);
 EXT void insert_context_chain(struct ip_flow_common *, unsigned int, char *, void *);
 EXT void clear_context_chain(struct ip_flow_common *, unsigned int);
+
 EXT void prepare_classifier_data(struct pkt_classifier_data *, struct ip_flow_common *, unsigned int, struct packet_ptrs *);
 
 EXT pm_class_t pmct_register(struct pkt_classifier *);

@@ -50,6 +50,11 @@ EXT void dst_host_handler(struct channels_list_entry *, struct packet_ptrs *, ch
 EXT void src_port_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void dst_port_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void ip_tos_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
+
+
+EXT void packet_payload_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
+EXT void packet_header_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
+
 EXT void ip_proto_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void tcp_flags_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void counters_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
@@ -86,6 +91,9 @@ EXT void NF_peer_dst_as_handler(struct channels_list_entry *, struct packet_ptrs
 EXT void NF_peer_src_ip_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void NF_peer_dst_ip_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void NF_ip_tos_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
+
+
+
 EXT void NF_ip_proto_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void NF_tcp_flags_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void NF_counters_msecs_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
@@ -148,6 +156,12 @@ EXT void SF_dst_as_handler(struct channels_list_entry *, struct packet_ptrs *, c
 EXT void SF_peer_src_ip_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void SF_peer_dst_ip_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void SF_ip_tos_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
+
+
+EXT void SF_packet_payload_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
+EXT void SF_packet_header_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
+EXT void unique_packet_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
+
 EXT void SF_ip_proto_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void SF_tcp_flags_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void SF_counters_new_handler(struct channels_list_entry *, struct packet_ptrs *, char **);

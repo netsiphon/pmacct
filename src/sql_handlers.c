@@ -722,6 +722,131 @@ void count_ip_tos_handler(const struct db_cache *cache_elem, struct insert_data 
 }
 
 
+
+
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+
+
+void count_packet_payload_handler(const struct db_cache *cache_elem, const struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
+{
+  int primitive_length = sizeof(cache_elem->primitives.packet_payload);
+  int payload_length, check_length, base, multiplier, remainder;
+  char extract_length[8];
+  char *payload_ptr;
+  
+  payload_ptr = (char *) &cache_elem->primitives.packet_payload[primitive_length - 8];
+  memset(extract_length, 0, sizeof(extract_length) - 1);
+  memcpy(extract_length, payload_ptr, sizeof(extract_length) - 1); 
+  
+  sscanf(extract_length, "%i", &check_length);
+  //printf("check length:%d \n\n",check_length);
+  if (check_length >= 2 && check_length <=1355) {
+    if (check_length < primitive_length) 
+	  {
+		payload_length = check_length;
+	  } 
+	  else {
+		payload_length = primitive_length;
+	  }
+	  char packet_payload[payload_length];
+	  memset(packet_payload, 0, sizeof(packet_payload));
+	  
+	  memcpy(packet_payload, cache_elem->primitives.packet_payload, payload_length);
+	  packet_payload[payload_length] = '\0';
+	  
+	  char *buf;
+	  int hex_length = (payload_length*2) - 1;
+	  buf = calloc(hex_length, sizeof(char));
+	  memset(buf, 0, hex_length);
+
+	  //print_payload(packet_payload, payload_length);
+	  
+	  //printf("PacketSize: %d \n",payload_length);
+	  buf = fasthex(packet_payload, payload_length);
+	  
+	  buf[hex_length - 1] = '\0';
+	  //printf("%s\n", buf);
+  
+  
+	  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, buf);
+	  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, buf);
+	  *ptr_where += strlen(*ptr_where);
+	  *ptr_values += strlen(*ptr_values);
+  } else {
+	  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, "");
+	  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, "");
+	  *ptr_where += strlen(*ptr_where);
+	  *ptr_values += strlen(*ptr_values);
+  }
+}
+
+void count_packet_header_handler(const struct db_cache *cache_elem, const struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
+{
+  int primitive_length = sizeof(cache_elem->primitives.packet_header);
+  int header_length, check_length;
+
+  
+  check_length = (int)cache_elem->primitives.packet_header[primitive_length - 2];
+  
+  if (check_length >= 2 && check_length <=129) {
+    if (check_length < primitive_length) 
+	  {
+		header_length = check_length;
+	  } 
+	  else {
+		header_length = primitive_length;
+	  }
+	  char packet_header[header_length];
+	  memset(packet_header, 0, sizeof(packet_header));
+	  
+	  memcpy(packet_header, cache_elem->primitives.packet_header, header_length - 1);
+	  packet_header[header_length - 1] = '\0';
+	  
+	  char *buf;
+	  int hex_length = (header_length*2) - 1;
+	  buf = calloc(hex_length, sizeof(char));
+	  memset(buf, 0, hex_length);
+
+	  //print_payload(packet_header, header_length);
+	  
+	  //printf("PacketHeaderSize: %d \n",header_length);
+	  buf = fasthex(packet_header, header_length);
+	  
+	  buf[hex_length - 1] = '\0';
+	  //printf("%s\n", buf);
+  
+  
+	  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, buf);
+	  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, buf);
+	  *ptr_where += strlen(*ptr_where);
+	  *ptr_values += strlen(*ptr_values);
+   } else {
+	  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, "");
+	  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, "");
+	  *ptr_where += strlen(*ptr_where);
+	  *ptr_values += strlen(*ptr_values);
+  }
+}
+
+
+void count_unique_packet_handler(const struct db_cache *cache_elem, const struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
+{
+  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, cache_elem->primitives.unique_packet);
+  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, cache_elem->primitives.unique_packet);
+  *ptr_where += strlen(*ptr_where);
+  *ptr_values += strlen(*ptr_values);
+}
+
+
 void MY_count_ip_proto_handler(const struct db_cache *cache_elem, struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
 {
   if (cache_elem->primitives.proto < protocols_number) {
@@ -1045,3 +1170,134 @@ void fake_host_aton_handler(const struct db_cache *cache_elem, struct insert_dat
   *ptr_where += strlen(*ptr_where);
   *ptr_values += strlen(*ptr_values);
 }
+
+char btoh(const u_char *payload, int len )
+{
+	u_char *retchar, *buf;
+	u_char const *pos,*end;
+	
+	end = payload + sizeof(payload);
+	
+	while (payload < end)
+	{
+		sprintf(retchar,"%02x",payload);
+		//*retchar = fasthex(payload,sizeof(payload));
+		retchar++;
+		payload++;
+	}
+
+	return *retchar;
+}
+
+/* The following functions were borrowed from Snort 2.6.1.1 source*/
+char *fasthex(u_char *xdata, int length)
+{
+    char conv[] = "0123456789ABCDEF";
+    char *retbuf = NULL; 
+    char *index;
+    char *end;
+    char *ridx;
+
+    index = xdata;
+    end = xdata + length;
+    retbuf = calloc((length*2)+1, sizeof(char));
+    ridx = retbuf;
+
+    while(index < end)
+    {
+        *ridx++ = conv[((*index & 0xFF)>>4)];
+        *ridx++ = conv[((*index & 0xFF)&0x0F)];
+        index++;
+    }
+
+    return retbuf;
+}
+
+void print_payload(const u_char *payload, int len)
+{
+
+	int len_rem = len;
+	int line_width = 16;			/* number of bytes per line */
+	int line_len;
+	int offset = 0;					/* zero-based offset counter */
+	const u_char *ch = payload;
+
+	if (len <= 0)
+		return;
+
+	/* data fits on one line */
+	if (len <= line_width) {
+		print_hex_ascii_line(ch, len, offset);
+		return;
+	}
+
+	/* data spans multiple lines */
+	for ( ;; ) {
+		/* compute current line length */
+		line_len = line_width % len_rem;
+		/* print line */
+		print_hex_ascii_line(ch, line_len, offset);
+		/* compute total remaining */
+		len_rem = len_rem - line_len;
+		/* shift pointer to remaining bytes to print */
+		ch = ch + line_len;
+		/* add offset */
+		offset = offset + line_width;
+		/* check if we have line width chars or less */
+		if (len_rem <= line_width) {
+			/* print last line and get out */
+			print_hex_ascii_line(ch, len_rem, offset);
+			break;
+		}
+	}
+
+return;
+}
+
+void print_hex_ascii_line(const u_char *payload, int len, int offset)
+{
+
+	int i;
+	int gap;
+	const u_char *ch;
+
+	/* offset */
+	printf("%05d   ", offset);
+	
+	/* hex */
+	ch = payload;
+	for(i = 0; i < len; i++) {
+		printf("%02x ", *ch);
+		ch++;
+		/* print extra space after 8th byte for visual aid */
+		if (i == 7)
+			printf(" ");
+	}
+	/* print space to handle line less than 8 bytes */
+	if (len < 8)
+		printf(" ");
+	
+	/* fill hex gap with spaces if not full line */
+	if (len < 16) {
+		gap = 16 - len;
+		for (i = 0; i < gap; i++) {
+			printf("   ");
+		}
+	}
+	printf("   ");
+	
+	/* ascii (if printable) */
+	ch = payload;
+	for(i = 0; i < len; i++) {
+		if (isprint(*ch))
+			printf("%c", *ch);
+		else
+			printf(".");
+		ch++;
+	}
+
+	printf("\n");
+
+return;
+}
+

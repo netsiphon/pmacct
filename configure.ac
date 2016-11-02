@@ -484,6 +484,31 @@ fi
 AC_MSG_RESULT($V_PCAP)
 AC_DEFINE_UNQUOTED(PCAP_TYPE_$V_PCAP, 1)
 
+dnl start: pcap fifo
+AC_MSG_CHECKING(Whether to enable PCAP FIFO plugin)
+AC_ARG_ENABLE(pcap_fifo,
+  [  --enable-pcap-fifo                   Enable PCAP FIFO plugin (default: yes)],
+  [ case "$enableval" in
+  yes)
+    AC_MSG_RESULT(yes)
+  
+    AC_CHECK_LIB([pcap], [pcap_dispatch], [], [AC_MSG_ERROR([
+    ERROR: missing pcap library. Refer to: http://www.tcpdump.org/
+  ])])
+
+    PLUGINS="${PLUGINS} pcap_fifo_plugin"
+    AC_DEFINE(WITH_PCAP_FIFO, 1)
+    ;;
+  no)
+    AC_MSG_RESULT(no)
+    ;;
+  esac ],
+  [
+    AC_MSG_RESULT(no)
+  ]
+)
+dnl finish: pcap fifo
+
 dnl start: mysql handling
 AC_MSG_CHECKING(whether to enable MySQL support)
 AC_ARG_ENABLE(mysql,

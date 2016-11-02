@@ -33,6 +33,7 @@
 #define PLUGIN_ID_AMQP		10
 #define PLUGIN_ID_KAFKA		11
 #define PLUGIN_ID_UNKNOWN       -1
+#define PLUGIN_ID_PCAP_FIFO	12
 
 /* vars */
 #if (!defined __PMACCTD_C) && (!defined __NFACCTD_C) && (!defined __SFACCTD_C) && (!defined __UACCTD_C) && (!defined __PMTELEMETRYD_C) && (!defined __PMACCT_CLIENT_C) && (!defined __PMBGPD_C) && (!defined __PMBMPD_C)
@@ -814,6 +815,7 @@ static const struct _dictionary_line dictionary[] = {
   {"tmp_net_own_field", cfg_key_tmp_net_own_field},
   {"tmp_asa_bi_flow", cfg_key_tmp_asa_bi_flow},
   {"tmp_comms_same_field", cfg_key_tmp_comms_same_field},
+  {"pcap_fifo_path", cfg_key_pcap_fifo_path},
   {"", NULL},
 };
 
@@ -842,6 +844,9 @@ static struct plugin_type_entry plugin_types_list[] = {
   {PLUGIN_ID_KAFKA,     "kafka",        kafka_plugin},
 #endif
   {PLUGIN_ID_TEE,	"tee",		tee_plugin},
+#ifdef WITH_PCAP_FIFO
+  {PLUGIN_ID_PCAP_FIFO,	"pcap_fifo",	pcap_fifo_plugin},
+#endif
   {PLUGIN_ID_UNKNOWN,	"",		NULL},
 };
 #endif

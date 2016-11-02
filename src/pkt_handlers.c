@@ -501,7 +501,38 @@ void evaluate_packet_handlers()
       else if (config.acct_type == ACCT_SF) channels_list[index].phandler[primitives] = SF_ip_tos_handler;
       primitives++;
     }
+	
+    
+	
+	
+      
+      
+      
+     
+    
+	
+	if (channels_list[index].aggregation & COUNT_PACKET_PAYLOAD) {
+		if (config.acct_type == ACCT_PM) channels_list[index].phandler[primitives] = packet_payload_handler;
+        else if (config.acct_type == ACCT_NF) primitives--;//No payload in NetFlow
+        else if (config.acct_type == ACCT_SF) channels_list[index].phandler[primitives] = SF_packet_payload_handler;
+		primitives++;
+	}
+	
+	if (channels_list[index].aggregation & COUNT_PACKET_HEADER) {
+		if (config.acct_type == ACCT_PM) channels_list[index].phandler[primitives] = packet_header_handler;
+        else if (config.acct_type == ACCT_NF) primitives--;//Ignoring NetFlow:D
+        else if (config.acct_type == ACCT_SF) channels_list[index].phandler[primitives] = SF_packet_header_handler;
+		primitives++;
+	}
 
+	if (channels_list[index].aggregation & COUNT_UNIQUE_PACKET) {
+		if (config.acct_type == ACCT_PM) channels_list[index].phandler[primitives] = unique_packet_handler;
+        else if (config.acct_type == ACCT_NF) channels_list[index].phandler[primitives] = unique_packet_handler;
+        else if (config.acct_type == ACCT_SF) channels_list[index].phandler[primitives] = unique_packet_handler;
+		primitives++;
+	}
+	
+	
     if (channels_list[index].aggregation & COUNT_IP_PROTO) {
       if (config.acct_type == ACCT_PM) channels_list[index].phandler[primitives] = ip_proto_handler;
       else if (config.acct_type == ACCT_NF) channels_list[index].phandler[primitives] = NF_ip_proto_handler;
@@ -519,7 +550,7 @@ void evaluate_packet_handlers()
     if (channels_list[index].aggregation & COUNT_FLOWS) {
       if (config.acct_type == ACCT_PM) channels_list[index].phandler[primitives] = flows_handler;
       else if (config.acct_type == ACCT_NF) channels_list[index].phandler[primitives] = NF_flows_handler;
-      else if (config.acct_type == ACCT_SF) primitives--; /* NO flows handling for sFlow */
+      else if (config.acct_type == ACCT_SF) primitives--; /* NO flow handling for sFlow */
       primitives++;
     }
 
@@ -1065,6 +1096,7 @@ void ip_tos_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs
   if (pptrs->l3_proto == ETHERTYPE_IP) {
     pdata->primitives.tos = ((struct my_iphdr *) pptrs->iph_ptr)->ip_tos;
   }
+  
 #if defined ENABLE_IPV6
   else if (pptrs->l3_proto == ETHERTYPE_IPV6) {
     tos = ntohl(((struct ip6_hdr *) pptrs->iph_ptr)->ip6_flow);
@@ -1073,6 +1105,52 @@ void ip_tos_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs
   }
 #endif
 }
+
+ 
+
+
+  
+
+  
+	
+  
+
+
+void packet_header_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
+{
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+  u_char buf[2048]; //bigger than we'll see
+
+  memcpy(&buf, pptrs->pkthdr, sizeof(pptrs->pkthdr));
+  
+  buf[sizeof(buf)] = '\0';
+  
+  if (!buf[0]=='\0') {
+	  memcpy(pdata->primitives.packet_header,buf,sizeof(pdata->primitives.packet_header));
+	  //strlcpy(pdata->primitives.packet_payload,buf,sizeof(pdata->primitives.packet_payload));
+  } else pdata->primitives.packet_header[0] = '\0';
+
+
+}
+
+void packet_payload_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
+{
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+  u_char buf[2048]; //bigger than we'll see
+
+  memcpy(&buf, pptrs->payload_ptr, sizeof(pptrs->payload_ptr));
+  
+  buf[sizeof(buf)] = '\0';
+  
+  if (!buf[0]=='\0') {
+	  memcpy(pdata->primitives.packet_payload,buf,sizeof(pdata->primitives.packet_payload));
+	  //strlcpy(pdata->primitives.packet_payload,buf,sizeof(pdata->primitives.packet_payload));
+  } else pdata->primitives.packet_payload[0] = '\0';
+
+
+}
+
+
 
 void ip_proto_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
@@ -2226,6 +2304,15 @@ void NF_ip_tos_handler(struct channels_list_entry *chptr, struct packet_ptrs *pp
     break;
   }
 }
+
+
+
+
+ 
+ 
+
+
+
 
 void NF_ip_proto_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
@@ -4680,6 +4767,88 @@ void SF_ip_tos_handler(struct channels_list_entry *chptr, struct packet_ptrs *pp
   pdata->primitives.tos = sample->dcd_ipTos;
 }
 
+
+
+
+  
+  
+
+  
+    
+  
+
+
+void SF_packet_payload_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
+{
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+  SFSample *sample = (SFSample *) pptrs->f_data;
+  int payload_length = sample->headerLen - sample->offsetToPayload;
+  u_char buf[(payload_length) + 8]; //I should be doing calloc for this
+  int size_c;
+  
+  if (!buf<=1) {
+	  memset(buf,0,sizeof(buf));
+	  size_c = sizeof(buf);
+	  //Just in case we don't have enough memory:)
+	if (payload_length <= size_c - 8) {
+	
+		memcpy(buf , sample->header + sample->offsetToPayload, payload_length);
+		
+		if (size_c <= sizeof(pdata->primitives.packet_payload)) memcpy(pdata->primitives.packet_payload,buf,payload_length);
+		  sprintf(&pdata->primitives.packet_payload[sizeof(pdata->primitives.packet_payload) - 8],"%d.", payload_length);
+		  pdata->primitives.packet_payload[sizeof(pdata->primitives.packet_payload) - 1] = '\0';
+	} else {
+		pdata->primitives.packet_payload[0] = '\0';
+	}
+	
+  }
+  
+}
+
+void SF_packet_header_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
+{
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+  SFSample *sample = (SFSample *) pptrs->f_data;
+  int header_length = sample->offsetToPayload;
+  int packet_length = sample->sampledPacketSize;
+  u_char buf[(header_length) + 9];
+  int size_c, inc;
+  
+  if (!buf<=1) {
+	  memset(buf,0,sizeof(buf));
+	  size_c = sizeof(buf);
+	  inc = size_c - 9;
+	  //Just in case we don't have enough memory:)
+	  if (header_length <= inc) {
+		  memcpy(buf, sample->header,header_length);
+		  //print_payload(buf, header_length);
+		  if (size_c <= sizeof(pdata->primitives.packet_header)) memcpy(pdata->primitives.packet_header,buf,header_length);
+		  pdata->primitives.packet_header[sizeof(pdata->primitives.packet_header) - 1] = '\0';
+		  pdata->primitives.packet_header[sizeof(pdata->primitives.packet_header) - 2] = header_length;
+		  sprintf(&pdata->primitives.packet_header[sizeof(pdata->primitives.packet_header) - 9],"%d.", packet_length);
+	  } else {
+		pdata->primitives.packet_header[0] = '\0';
+	  }
+  }
+ 
+}
+
+void unique_packet_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
+{
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+  u_int32_t check,val,rmax,time_val;
+  time_t timenow;
+  time_t timethen;
+  
+  timenow = time(NULL);
+  time_val = (u_int32_t)timenow;
+  
+  rmax = 65535;
+  val = rand();
+  pdata->primitives.unique_packet = time_val + val;
+}
+
+
 void SF_ip_proto_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
   struct pkt_data *pdata = (struct pkt_data *) *data;
@@ -5118,8 +5287,12 @@ void SF_class_handler(struct channels_list_entry *chptr, struct packet_ptrs *ppt
 {
   struct pkt_data *pdata = (struct pkt_data *) *data;
   SFSample *sample = (SFSample *) pptrs->f_data;
-
-  pdata->primitives.class = sample->class;
+  if (sample->class) {
+    pdata->primitives.class = sample->class;
+  }
+  else {
+    pdata->primitives.class = pptrs->class;
+  }
   pdata->cst.ba = 0;
   pdata->cst.pa = 0;
   pdata->cst.fa = 0;
@@ -5423,3 +5596,4 @@ char *lookup_tpl_ext_db(void *entry, u_int32_t pen, u_int16_t type)
 
   return NULL;
 }
+

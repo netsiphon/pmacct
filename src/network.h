@@ -239,6 +239,9 @@ struct my_icmphdr
 struct my_tlhdr {
    u_int16_t	src_port;	/* source and destination ports */
    u_int16_t	dst_port;
+   
+   
+   
 };
 
 #define MAX_GTP_TRIALS	8
@@ -422,6 +425,12 @@ struct pkt_primitives {
   u_int16_t src_port;
   u_int16_t dst_port;
   u_int8_t tos;
+  
+  
+  u_char packet_payload[1518];
+  u_char packet_header[138];//anything after 129 should not be output
+  u_int32_t unique_packet;
+  
   u_int8_t proto;
   u_int32_t ifindex_in;
   u_int32_t ifindex_out;
