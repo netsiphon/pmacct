@@ -62,6 +62,11 @@ libdaemons_la_SOURCES += kafka_common.c kafka_common.h kafka_plugin.c kafka_plug
 libdaemons_la_LIBADD  += @KAFKA_LIBS@
 libdaemons_la_CFLAGS  += @KAFKA_CFLAGS@
 endif
+if WITH_PCAP_FIFO
+libdaemons_la_SOURCES += pcap_fifo_plugin.c pcap_fifo_plugin.h
+libdaemons_la_LIBADD  += @PCAP_FIFO_LIBS@
+libdaemons_la_CFLAGS  += @PCAP_FIFO_CFLAGS@
+endif
 if USING_SQL
 libdaemons_la_SOURCES += sql_common.c sql_handlers.c sql_common.h
 libdaemons_la_LIBADD  += -lm -lz
