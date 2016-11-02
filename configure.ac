@@ -497,6 +497,7 @@ AC_ARG_ENABLE(pcap_fifo,
   ])])
 
     PLUGINS="${PLUGINS} pcap_fifo_plugin"
+    USING_PCAP_FIFO="yes"
     AC_DEFINE(WITH_PCAP_FIFO, 1)
     ;;
   no)
