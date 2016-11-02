@@ -22,30 +22,34 @@
 /* includes */
 
 /* prototypes */
-void pcap_fifo_plugin(int, struct configuration *, void *);
-int init_pcap_fifo(char *, int *);
-void writePcapHeader(int *, char *);
-void writePcapPacket(struct pkt_data *, int *, char *);
-int write_to_pcap_fifo(char *, int *, int *);
-void close_pcap_fifo(int *);
-void unlink_pcap_fifo(char *);
-void pcap_fifo_init_pipe(struct pollfd *, int);
-void pcap_fifo_exit_now(int);
+#if (!defined __PCAP_FIFO_PLUGIN_C)
+#define EXT extern
+#else
+#define EXT
+#endif
+
+EXT void pcap_fifo_plugin(int, struct configuration *, void *);
+EXT int init_pcap_fifo(char *, int *);
+EXT void writePcapHeader(int *, char *);
+EXT void writePcapPacket(struct pkt_data *, int *, char *);
+EXT int write_to_pcap_fifo(char *, int *, int *);
+EXT void close_pcap_fifo(int *);
+EXT void unlink_pcap_fifo(char *);
+EXT void pcap_fifo_init_pipe(struct pollfd *, int);
+EXT void pcap_fifo_exit_now(int);
 /* variables */
-static char pcap_fifo_default_path[] = "/tmp/pcap_fifo";
-/*JK*/
-char fifo_name[256];
-int *fifo_socket;
-FILE *fifo_stream;
-int fifo_header;
-/*end JK*/
+EXT static char pcap_fifo_default_path[] = "/tmp/pcap_fifo";
+EXT char fifo_name[256];
+EXT int *fifo_socket;
+EXT FILE *fifo_stream;
+EXT int fifo_header;
 
 
 
 
 /* tcpdump file format */
 
-struct pcap_my_file_header {
+EXT struct pcap_my_file_header {
   u_int32_t magic;
   u_int16_t version_major;
   u_int16_t version_minor;
@@ -55,7 +59,7 @@ struct pcap_my_file_header {
   u_int32_t linktype;	/* data link type (DLT_*) */
   };
 
-struct pcap_my_pkthdr {
+EXT struct pcap_my_pkthdr {
   struct timeval ts;	/* time stamp */
   u_int32_t caplen;	/* length of portion present */
   u_int32_t len;	/* length this packet (off wire) */
@@ -67,3 +71,5 @@ struct pcap_my_pkthdr {
    * To pad the header with zeros, use the tcpdumpHdrPad option.
    */
 };
+
+#undef EXT
