@@ -62,7 +62,7 @@ void pcap_fifo_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   struct ring *rg = &((struct channels_list_entry *)ptr)->rg;
   struct ch_status *status = ((struct channels_list_entry *)ptr)->status;
   u_int32_t bufsz = ((struct channels_list_entry *)ptr)->bufsize;
-  char *pipebuf_ptr;
+  u_char *pipebuf_ptr;
   unsigned char *rgptr;
   int pollagain = TRUE;
   u_int32_t seq = 1, rg_err_count = 0;
@@ -190,7 +190,7 @@ void pcap_fifo_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 				
 				writePcapPacket(data, &fifo_bytes, fifo_output);
 				if (write_to_pcap_fifo(fifo_output, fifo_socket, &fifo_bytes) == -1) {
-					unlink_pcap_fifo(fifo_name);
+					//unlink_pcap_fifo(fifo_name);
 					goto poll_again;
 				}
 			}
@@ -198,8 +198,9 @@ void pcap_fifo_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 			if (((struct ch_buf_hdr *)pipebuf)->num) data++;
 		 goto read_data;
 	  }
-    }close_pcap_fifo(*fifo_socket);
-	 unlink_pcap_fifo(&fifo_name);
+    }
+	 close_pcap_fifo(fifo_socket);
+	 unlink_pcap_fifo(fifo_name);
   } 
 //
 
@@ -368,7 +369,7 @@ void close_pcap_fifo(int *fifo_socket) {
 }
 
 void unlink_pcap_fifo(char *fifo_name) {
-	unlink(*fifo_name);
+	unlink(&fifo_name[0]);
 	Log(LOG_INFO, "INFO ( %s/%s ): Deleting PCAP packet FIFO ...\n", config.name, config.type);
 }
 
@@ -382,6 +383,6 @@ void pcap_fifo_init_pipe(struct pollfd *pollfd, int fd)
 void pcap_fifo_exit_now(int signum)
 {   
    close_pcap_fifo(fifo_socket);
-   unlink_pcap_fifo(&fifo_name);
+   unlink_pcap_fifo(fifo_name);
    exit_plugin(0);
 }
