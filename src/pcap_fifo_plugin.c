@@ -27,8 +27,9 @@
 #include "pmacct.h"
 #include "pmacct-data.h"
 #include "plugin_hooks.h"
-#include "net_aggr.h"
-#include "ports_aggr.h"
+#include "plugin_common.h"
+//#include "net_aggr.h"
+//#include "ports_aggr.h"
 #include "pcap_fifo_plugin.h"
 
 
@@ -160,17 +161,17 @@ void pcap_fifo_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 			  goto poll_again;
 			}
 			else {
-		  rg_err_count++;
-		  if (config.debug || (rg_err_count > MAX_RG_COUNT_ERR)) {
-			Log(LOG_ERR, "ERROR ( %s/%s ): We are missing data.\n", config.name, config.type);
-			Log(LOG_ERR, "If you see this message once in a while, discard it. Otherwise some solutions follow:\n");
-			Log(LOG_ERR, "- increase shared memory size, 'plugin_pipe_size'; now: '%u'.\n", config.pipe_size);
-			Log(LOG_ERR, "- increase buffer size, 'plugin_buffer_size'; now: '%u'.\n", config.buffer_size);
-			Log(LOG_ERR, "- increase system maximum socket size.\n\n");
+		  		rg_err_count++;
+		  		if (config.debug || (rg_err_count > MAX_RG_COUNT_ERR)) {
+					Log(LOG_ERR, "ERROR ( %s/%s ): We are missing data.\n", config.name, config.type);
+					Log(LOG_ERR, "If you see this message once in a while, discard it. Otherwise some solutions follow:\n");
+					Log(LOG_ERR, "- increase shared memory size, 'plugin_pipe_size'; now: '%u'.\n", config.pipe_size);
+					Log(LOG_ERR, "- increase buffer size, 'plugin_buffer_size'; now: '%u'.\n", config.buffer_size);
+					Log(LOG_ERR, "- increase system maximum socket size.\n\n");
+		  	}
+		  	seq = ((struct ch_buf_hdr *)rg->ptr)->seq;
 		  }
-		  seq = ((struct ch_buf_hdr *)rg->ptr)->seq;
-		}
-		  }
+	}
 		  
 		  pollagain = FALSE;
 		  memcpy(pipebuf, rg->ptr, bufsz);

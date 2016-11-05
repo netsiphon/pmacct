@@ -65,8 +65,8 @@ struct pkt_classifier {
 /* prototypes */
 EXT void init_classifiers(char *);
 EXT void evaluate_classifiers(struct packet_ptrs *, struct ip_flow_common *, unsigned int);
-//EXT pm_class_t SF_evaluate_classifiers(char *);
-EXT void SF_evaluate_classifiers(struct packet_ptrs *, struct ip_flow_common *, unsigned int);
+EXT pm_class_t SF_evaluate_classifiers(char *);
+//EXT void SF_evaluate_classifiers(struct packet_ptrs *, struct ip_flow_common *, unsigned int);
 EXT void SF_prepare_classifier_data(struct pkt_classifier_data *, struct ip_flow_common *, unsigned int, struct packet_ptrs *);
 EXT int parse_pattern_file(char *, struct pkt_classifier *);
 EXT int parse_shared_object(char *, struct pkt_classifier *);

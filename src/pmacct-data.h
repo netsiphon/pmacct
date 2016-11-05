@@ -115,6 +115,9 @@ static const struct _primitives_matrix_struct _primitives_matrix[] = {
   {"timestamp_start", 0, 0, 1, 0, 0, 0, 0, "Flow start time or observation time at the exporter"},
   {"timestamp_end", 0, 0, 1, 0, 0, 0, 0, "Flow end time"},
   {"timestamp_arrival", 1, 1, 1, 1, 0, 0, 0, "Observation time at the collector"},
+  {"packet_payload", 1, 1, 1, 1, 0, 0, 0, "Packet Payload"},
+  {"packet_header", 1, 1, 1, 1, 0, 0, 0, "Packet Header"},
+  {"unique_packet", 1, 1, 1, 1, 0, 0, 0, "Unique Packet Value"},
   {"", 0, 0, 0, 0, 0, 0, 0, ""}
 };
 
@@ -858,3 +861,4 @@ static struct tunnel_entry tunnel_handlers_list[] = {
 };
 
 #endif
+

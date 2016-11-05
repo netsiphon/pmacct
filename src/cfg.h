@@ -511,7 +511,9 @@ struct configuration {
   int tmp_asa_bi_flow;
   int tmp_comms_same_field;
   size_t thread_stack;
+#if defined WITH_PCAP_FIFO
   char *pcap_fifo_path;
+#endif
 };
 
 /* prototypes */ 

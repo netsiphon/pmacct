@@ -196,9 +196,6 @@ int cfg_key_aggregate(char *filename, char *name, char *value_ptr)
     else if (!strcmp(count_token, "src_port")) cfg_set_aggregate(filename, value, COUNT_INT_SRC_PORT, count_token);
     else if (!strcmp(count_token, "dst_port")) cfg_set_aggregate(filename, value, COUNT_INT_DST_PORT, count_token);
     else if (!strcmp(count_token, "proto")) cfg_set_aggregate(filename, value, COUNT_INT_IP_PROTO, count_token);
-    else if (!strcmp(count_token, "packet_payload")) cfg_set_aggregate(filename, value, COUNT_PACKET_PAYLOAD, count_token);
-    else if (!strcmp(count_token, "packet_header")) cfg_set_aggregate(filename, value, COUNT_PACKET_HEADER, count_token);
-    else if (!strcmp(count_token, "unique_packet")) cfg_set_aggregate(filename, value, COUNT_UNIQUE_PACKET, count_token);
 #if defined (HAVE_L2)
     else if (!strcmp(count_token, "src_mac")) cfg_set_aggregate(filename, value, COUNT_INT_SRC_MAC, count_token);
     else if (!strcmp(count_token, "dst_mac")) cfg_set_aggregate(filename, value, COUNT_INT_DST_MAC, count_token);
@@ -265,6 +262,9 @@ int cfg_key_aggregate(char *filename, char *name, char *value_ptr)
     else if (!strcmp(count_token, "label")) cfg_set_aggregate(filename, value, COUNT_INT_LABEL, count_token);
     else if (!strcmp(count_token, "export_proto_seqno")) cfg_set_aggregate(filename, value, COUNT_INT_EXPORT_PROTO_SEQNO, count_token);
     else if (!strcmp(count_token, "export_proto_version")) cfg_set_aggregate(filename, value, COUNT_INT_EXPORT_PROTO_VERSION, count_token);
+    else if (!strcmp(count_token, "packet_payload")) cfg_set_aggregate(filename, value, COUNT_INT_PACKET_PAYLOAD, count_token);
+    else if (!strcmp(count_token, "packet_header")) cfg_set_aggregate(filename, value, COUNT_INT_PACKET_HEADER, count_token);
+    else if (!strcmp(count_token, "unique_packet")) cfg_set_aggregate(filename, value, COUNT_INT_UNIQUE_PACKET, count_token);
     else {
       cpptrs.primitive[cpptrs.num].name = count_token;
       cpptrs.num++;

@@ -444,7 +444,7 @@ int main(int argc,char **argv, char **envp)
 	evaluate_sums(&list->cfg.what_to_count, list->name, list->type.string);
 	if (!list->cfg.what_to_count && !list->cfg.what_to_count_2 && !list->cfg.cpptrs.num) {
 	  Log(LOG_WARNING, "WARN ( %s/%s ): defaulting to SRC HOST aggregation.\n", list->name, list->type.string);
-	  list->cfg.what_to_count |= COUNT_SRC_HOST;
+	  //list->cfg.what_to_count |= COUNT_SRC_HOST;
 	}
         if (((list->cfg.what_to_count & COUNT_SRC_HOST) && (list->cfg.what_to_count & COUNT_SRC_NET)) ||
             ((list->cfg.what_to_count & COUNT_DST_HOST) && (list->cfg.what_to_count & COUNT_DST_NET))) {
@@ -1781,7 +1781,7 @@ void finalizeSample(SFSample *sample, struct packet_ptrs_vector *pptrsv, struct 
 	
 	dummyfp->proto = sample->dcd_ipProtocol;
 	//dummyfp->
-	SF_evaluate_classifiers(pptrs, dummyfp, 1);
+	//SF_evaluate_classifiers(pptrs, dummyfp, 1);
 	
 	
 	/*PCAP FIFO ALPHA

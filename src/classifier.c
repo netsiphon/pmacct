@@ -108,7 +108,7 @@ void init_classifiers(char *path)
   }
 }
 
-/*pm_class_t SF_evaluate_classifiers(char *string)
+pm_class_t SF_evaluate_classifiers(char *string)
 {
   int j = 0, max = pmct_get_num_entries();
 
@@ -118,9 +118,9 @@ void init_classifiers(char *path)
   }
 
   return 0;
-}*/
+}
 
-void SF_evaluate_classifiers(struct packet_ptrs *pptrs, struct ip_flow_common *fp, unsigned int idx)
+void SF_evaluate_classifiers2(struct packet_ptrs *pptrs, struct ip_flow_common *fp, unsigned int idx)
 {
   struct pkt_classifier_data data;
   int plen = (config.snaplen ? config.snaplen : DEFAULT_SNAPLEN);
