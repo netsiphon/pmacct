@@ -861,16 +861,22 @@ int main(int argc,char **argv)
 	  count_token_int[count_index] = COUNT_INT_SAMPLING_RATE;
 	  what_to_count_2 |= COUNT_SAMPLING_RATE;
 	}
-	
-	  
-	  
-	  
-	 
-	  else if (!strcmp(count_token[count_index], "packet_payload")) {
+
+	else if (!strcmp(count_token[count_index], "packet_payload")) {
 	  count_token_int[count_index] = COUNT_PACKET_PAYLOAD;
-	  what_to_count |= COUNT_PACKET_PAYLOAD;
+	  what_to_count_2 |= COUNT_PACKET_PAYLOAD;
 	}
+
+	else if (!strcmp(count_token[count_index], "packet_header")) {
+          count_token_int[count_index] = COUNT_PACKET_HEADER;
+          what_to_count_2 |= COUNT_PACKET_HEADER;
+        }
 	
+	else if (!strcmp(count_token[count_index], "unique_packet")) {
+          count_token_int[count_index] = COUNT_UNIQUE_PACKET;
+          what_to_count_2 |= COUNT_UNIQUE_PACKET;
+        }
+
         else if (!strcmp(count_token[count_index], "none")) {
 	  count_token_int[count_index] = COUNT_INT_NONE;
 	  what_to_count |= COUNT_NONE;

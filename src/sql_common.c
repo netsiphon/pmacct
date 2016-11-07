@@ -1106,8 +1106,8 @@ int sql_evaluate_primitives(int primitive)
 
     if (config.what_to_count & COUNT_SUM_PORT) what_to_count |= COUNT_SUM_PORT;
 
-    //what_to_count |= COUNT_SRC_PORT|COUNT_DST_PORT|COUNT_TCPFLAGS|COUNT_IP_PROTO|COUNT_CLASS|COUNT_VLAN|COUNT_IP_TOS;
-    what_to_count |= COUNT_SRC_PORT|COUNT_DST_PORT|COUNT_IP_PROTO|COUNT_CLASS|COUNT_VLAN|COUNT_IP_TOS|COUNT_PACKET_PAYLOAD|COUNT_PACKET_HEADER|COUNT_UNIQUE_PACKET;
+    what_to_count |= COUNT_SRC_PORT|COUNT_DST_PORT|COUNT_TCPFLAGS|COUNT_IP_PROTO|COUNT_CLASS|COUNT_VLAN|COUNT_IP_TOS;
+    //what_to_count |= COUNT_SRC_PORT|COUNT_DST_PORT|COUNT_TCPFLAGS|COUNT_IP_PROTO|COUNT_CLASS|COUNT_VLAN|COUNT_IP_TOS|COUNT_PACKET_PAYLOAD|COUNT_PACKET_HEADER|COUNT_UNIQUE_PACKET;
 
     if (config.what_to_count & COUNT_SRC_HOST) what_to_count |= COUNT_SRC_HOST;
     else if (config.what_to_count & COUNT_SUM_HOST) what_to_count |= COUNT_SUM_HOST;
@@ -1218,6 +1218,9 @@ int sql_evaluate_primitives(int primitive)
     if (config.what_to_count_2 & COUNT_EXPORT_PROTO_SEQNO) what_to_count_2 |= COUNT_EXPORT_PROTO_SEQNO;
     if (config.what_to_count_2 & COUNT_EXPORT_PROTO_VERSION) what_to_count_2 |= COUNT_EXPORT_PROTO_VERSION;
     if (config.what_to_count_2 & COUNT_LABEL) what_to_count_2 |= COUNT_LABEL;
+    if (config.what_to_count_2 & COUNT_PACKET_PAYLOAD) what_to_count_2 |= COUNT_PACKET_PAYLOAD;
+    if (config.what_to_count_2 & COUNT_PACKET_HEADER) what_to_count_2 |= COUNT_PACKET_HEADER;
+    if (config.what_to_count_2 & COUNT_UNIQUE_PACKET) what_to_count_2 |= COUNT_UNIQUE_PACKET;
   }
 
   /* sorting out delimiter */
@@ -2111,15 +2114,15 @@ int sql_evaluate_primitives(int primitive)
     }
   }
   
-   if (what_to_count & COUNT_PACKET_PAYLOAD) {
+   if (what_to_count_2 & COUNT_PACKET_PAYLOAD) {
     int count_it = FALSE;
 
     if ((config.sql_table_version < 7) && !assume_custom_table) {
-      if (config.what_to_count & COUNT_PACKET_PAYLOAD) {
+      if (config.what_to_count_2 & COUNT_PACKET_PAYLOAD) {
         Log(LOG_ERR, "ERROR ( %s/%s ): The use of packet_payload requires SQL table v7. Exiting.\n", config.name, config.type);
         exit_plugin(1);
       }
-      else what_to_count ^= COUNT_PACKET_PAYLOAD;
+      else what_to_count_2 ^= COUNT_PACKET_PAYLOAD;
     }
     else count_it = TRUE;
 
@@ -2139,15 +2142,15 @@ int sql_evaluate_primitives(int primitive)
     }
   }
   
-   if (what_to_count & COUNT_PACKET_HEADER) {
+   if (what_to_count_2 & COUNT_PACKET_HEADER) {
     int count_it = FALSE;
 
     if ((config.sql_table_version < 7) && !assume_custom_table) {
-      if (config.what_to_count & COUNT_PACKET_HEADER) {
+      if (config.what_to_count_2 & COUNT_PACKET_HEADER) {
         Log(LOG_ERR, "ERROR ( %s/%s ): The use of packet_header requires SQL table v7. Exiting.\n", config.name, config.type);
         exit_plugin(1);
       }
-      else what_to_count ^= COUNT_PACKET_HEADER;
+      else what_to_count_2 ^= COUNT_PACKET_HEADER;
     }
     else count_it = TRUE;
 
@@ -2167,15 +2170,15 @@ int sql_evaluate_primitives(int primitive)
     }
   }
   
-  if (what_to_count & COUNT_UNIQUE_PACKET) {
+  if (what_to_count_2 & COUNT_UNIQUE_PACKET) {
     int count_it = FALSE;
 
     if ((config.sql_table_version < 7) && !assume_custom_table) {
-      if (config.what_to_count & COUNT_UNIQUE_PACKET) {
+      if (config.what_to_count_2 & COUNT_UNIQUE_PACKET) {
         Log(LOG_ERR, "ERROR ( %s/%s ): The use of unique requires SQL table v7. Exiting.\n", config.name, config.type);
         exit_plugin(1);
       }
-      else what_to_count ^= COUNT_UNIQUE_PACKET;
+      else what_to_count_2 ^= COUNT_UNIQUE_PACKET;
     }
     else count_it = TRUE;
 

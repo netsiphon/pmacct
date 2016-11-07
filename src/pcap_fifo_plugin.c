@@ -182,22 +182,22 @@ void pcap_fifo_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 		  data = (struct pkt_data *) pipebuf_ptr;
 		  //print_payload(data->primitives.packet_header, sizeof(data->primitives.packet_header));
 		  //print_payload(data->primitives.packet_payload, sizeof(data->primitives.packet_payload));
-			if (*fifo_socket > 0) {
+		  if (*fifo_socket > -1 ) {
 				char fifo_output[2048];
 				int fifo_bytes;
 				
 				memset(fifo_output,0,sizeof(fifo_output));
 				memset(&fifo_bytes,0,sizeof(fifo_bytes));
-				
+
 				writePcapPacket(data, &fifo_bytes, fifo_output);
 				if (write_to_pcap_fifo(fifo_output, fifo_socket, &fifo_bytes) == -1) {
 					//unlink_pcap_fifo(fifo_name);
 					goto poll_again;
 				}
-			}
-			((struct ch_buf_hdr *)pipebuf)->num--;
-			if (((struct ch_buf_hdr *)pipebuf)->num) data++;
-		 goto read_data;
+		   }
+		   ((struct ch_buf_hdr *)pipebuf)->num--;
+		   if (((struct ch_buf_hdr *)pipebuf)->num) data++;
+		   goto read_data;
 	  }
     }
 	 close_pcap_fifo(fifo_socket);
@@ -251,7 +251,6 @@ void writePcapPacket(struct pkt_data *pdata, int *bytes, char *output) {
   /*XXX dirty*/
   header_length = (int)pdata->primitives.packet_header[sizeof(pdata->primitives.packet_header) - 2];
   
-  
   caplen_ptr = &pdata->primitives.packet_payload[payload_primitive_length];
   memset(extract_length, 0, sizeof(extract_length) -1);
   memcpy(extract_length, caplen_ptr, sizeof(extract_length) - 1);
@@ -304,29 +303,12 @@ void writePcapPacket(struct pkt_data *pdata, int *bytes, char *output) {
   -----------------___________________________------------------
 */
 int write_to_pcap_fifo(char *input, int *fifo_socket, int *bytes) {
-	//FILE *fifo_so;
-	//fifo_so = (FILE *) malloc(sizeof(FILE));
-	
-	//DEFAULT: if no fifo name gets to us set the default
-	//if(strlen(fifo_name) < 1) strlcpy(fifo_name, "/tmp/pcap_fifo", 15);
-	
-	//fifo_so = fdopen(*fifo_socket, "w");
-	//results=write(fd,"testies", 7);
-	
-	//if(fifo_so == NULL) {
-	//	Log(LOG_WARNING, "WARN ( default/core ): Initializing PCAP packet FIFO stream FAILED! ...\n");
-	//	return -1;
-	//} 
-	//else {
-		//Log(LOG_INFO, "INFO ( default/core ): Initializing PCAP packet FIFO ...\n");
-		if(write(*fifo_socket, input, *bytes) == -1) {
-			Log(LOG_ERR, "ERROR ( %s/%s ): Writing to PCAP packet FIFO FAILED! ...\n", config.name, config.type);
-			*fifo_socket = -1;
-			return ERR;
-		}
-	//}
+	if(write(*fifo_socket, input, *bytes) == -1) {
+		Log(LOG_ERR, "ERROR ( %s/%s ): Writing to PCAP packet FIFO FAILED! ...\n", config.name, config.type);
+		*fifo_socket = -1;
+		return ERR;
+	}
 	Log(LOG_DEBUG, "DEBUG ( %s/%s ): Copy to PCAP packet FIFO stream ...\n", config.name, config.type);
-	//free(fifo_so);
 	return SUCCESS;
 }
 /*_________________---------------------------__________________

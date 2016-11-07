@@ -502,30 +502,21 @@ void evaluate_packet_handlers()
       primitives++;
     }
 	
-    
-	
-	
-      
-      
-      
-     
-    
-	
-	if (channels_list[index].aggregation & COUNT_PACKET_PAYLOAD) {
+	if (channels_list[index].aggregation_2 & COUNT_PACKET_PAYLOAD) {
 		if (config.acct_type == ACCT_PM) channels_list[index].phandler[primitives] = packet_payload_handler;
-        else if (config.acct_type == ACCT_NF) primitives--;//No payload in NetFlow
-        else if (config.acct_type == ACCT_SF) channels_list[index].phandler[primitives] = SF_packet_payload_handler;
+                else if (config.acct_type == ACCT_NF) primitives--;//No payload in NetFlow
+                else if (config.acct_type == ACCT_SF) channels_list[index].phandler[primitives] = SF_packet_payload_handler;
 		primitives++;
 	}
 	
-	if (channels_list[index].aggregation & COUNT_PACKET_HEADER) {
+	if (channels_list[index].aggregation_2 & COUNT_PACKET_HEADER) {
 		if (config.acct_type == ACCT_PM) channels_list[index].phandler[primitives] = packet_header_handler;
         else if (config.acct_type == ACCT_NF) primitives--;//Ignoring NetFlow:D
         else if (config.acct_type == ACCT_SF) channels_list[index].phandler[primitives] = SF_packet_header_handler;
 		primitives++;
 	}
 
-	if (channels_list[index].aggregation & COUNT_UNIQUE_PACKET) {
+	if (channels_list[index].aggregation_2 & COUNT_UNIQUE_PACKET) {
 		if (config.acct_type == ACCT_PM) channels_list[index].phandler[primitives] = unique_packet_handler;
         else if (config.acct_type == ACCT_NF) channels_list[index].phandler[primitives] = unique_packet_handler;
         else if (config.acct_type == ACCT_SF) channels_list[index].phandler[primitives] = unique_packet_handler;
@@ -4767,41 +4758,30 @@ void SF_ip_tos_handler(struct channels_list_entry *chptr, struct packet_ptrs *pp
   pdata->primitives.tos = sample->dcd_ipTos;
 }
 
-
-
-
-  
-  
-
-  
-    
-  
-
-
 void SF_packet_payload_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
   struct pkt_data *pdata = (struct pkt_data *) *data;
   SFSample *sample = (SFSample *) pptrs->f_data;
   int payload_length = sample->headerLen - sample->offsetToPayload;
   u_char buf[(payload_length) + 8]; //I should be doing calloc for this
-  int size_c;
-  
-  if (!buf<=1) {
-	  memset(buf,0,sizeof(buf));
-	  size_c = sizeof(buf);
-	  //Just in case we don't have enough memory:)
+  int size_c = sizeof(buf);
+  //printf("PayloadSize:%i\n",size_c);
+  if (size_c > 8) {
+	memset(buf,0,sizeof(buf));
+	//Just in case we don't have enough memory:)
 	if (payload_length <= size_c - 8) {
 	
 		memcpy(buf , sample->header + sample->offsetToPayload, payload_length);
 		
 		if (size_c <= sizeof(pdata->primitives.packet_payload)) memcpy(pdata->primitives.packet_payload,buf,payload_length);
-		  sprintf(&pdata->primitives.packet_payload[sizeof(pdata->primitives.packet_payload) - 8],"%d.", payload_length);
-		  pdata->primitives.packet_payload[sizeof(pdata->primitives.packet_payload) - 1] = '\0';
-	} else {
-		pdata->primitives.packet_payload[0] = '\0';
+		sprintf(&pdata->primitives.packet_payload[sizeof(pdata->primitives.packet_payload) - 8],"%d.", payload_length);
+		pdata->primitives.packet_payload[sizeof(pdata->primitives.packet_payload) - 1] = '\0';
+        } else {
+		pdata->primitives.packet_payload[0] = '1';
 	}
-	
-  }
+  } else {
+      pdata->primitives.packet_payload[0] = '2';
+ }
   
 }
 
@@ -4809,16 +4789,19 @@ void SF_packet_header_handler(struct channels_list_entry *chptr, struct packet_p
 {
   struct pkt_data *pdata = (struct pkt_data *) *data;
   SFSample *sample = (SFSample *) pptrs->f_data;
-  int header_length = sample->offsetToPayload;
+  //int header_length = sample->offsetToPayload;
+  int header_length = sample->headerLen;
   int packet_length = sample->sampledPacketSize;
   u_char buf[(header_length) + 9];
   int size_c, inc;
   
-  if (!buf<=1) {
+  size_c = sizeof(buf);
+  //printf("HeaderSize:%i\n",size_c);
+  if (size_c > 9) {
 	  memset(buf,0,sizeof(buf));
-	  size_c = sizeof(buf);
 	  inc = size_c - 9;
 	  //Just in case we don't have enough memory:)
+          //print_payload(buf, header_length);
 	  if (header_length <= inc) {
 		  memcpy(buf, sample->header,header_length);
 		  //print_payload(buf, header_length);
@@ -4826,10 +4809,12 @@ void SF_packet_header_handler(struct channels_list_entry *chptr, struct packet_p
 		  pdata->primitives.packet_header[sizeof(pdata->primitives.packet_header) - 1] = '\0';
 		  pdata->primitives.packet_header[sizeof(pdata->primitives.packet_header) - 2] = header_length;
 		  sprintf(&pdata->primitives.packet_header[sizeof(pdata->primitives.packet_header) - 9],"%d.", packet_length);
-	  } else {
-		pdata->primitives.packet_header[0] = '\0';
-	  }
-  }
+	   } else {
+           	  pdata->primitives.packet_payload[0] = '1';
+           }
+  } else {
+      pdata->primitives.packet_payload[0] = '2'; 
+ }
  
 }
 
