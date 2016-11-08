@@ -4764,14 +4764,16 @@ void SF_packet_payload_handler(struct channels_list_entry *chptr, struct packet_
   SFSample *sample = (SFSample *) pptrs->f_data;
   int payload_length = sample->headerLen - sample->offsetToPayload;
   u_char buf[(payload_length) + 8]; //I should be doing calloc for this
-  int size_c = sizeof(buf);
+  int size_c;
+
   //printf("PayloadSize:%i\n",size_c);
-  if (size_c > 8) {
+  if (!buf<=1) {
 	memset(buf,0,sizeof(buf));
+	int size_c = sizeof(buf);
 	//Just in case we don't have enough memory:)
 	if (payload_length <= size_c - 8) {
 	
-		memcpy(buf , sample->header + sample->offsetToPayload, payload_length);
+		memcpy(buf,sample->header + sample->offsetToPayload, payload_length);
 		
 		if (size_c <= sizeof(pdata->primitives.packet_payload)) memcpy(pdata->primitives.packet_payload,buf,payload_length);
 		sprintf(&pdata->primitives.packet_payload[sizeof(pdata->primitives.packet_payload) - 8],"%d.", payload_length);
@@ -4779,26 +4781,22 @@ void SF_packet_payload_handler(struct channels_list_entry *chptr, struct packet_
         } else {
 		pdata->primitives.packet_payload[0] = '\0';
 	}
-  } else {
-      pdata->primitives.packet_payload[0] = '\0';
- }
-  
+   }
 }
 
 void SF_packet_header_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
   struct pkt_data *pdata = (struct pkt_data *) *data;
   SFSample *sample = (SFSample *) pptrs->f_data;
-  //int header_length = sample->header_bytes;
   int header_length = sample->offsetToPayload;
   int packet_length = sample->sampledPacketSize;
   u_char buf[(header_length) + 9];
   int size_c, inc;
   
-  size_c = sizeof(buf);
   //printf("HeaderSize:%i\n",size_c);
-  if (size_c > 9) {
+  if (!buf<=1) {
 	  memset(buf,0,sizeof(buf));
+	  size_c = sizeof(buf);
 	  inc = size_c - 9;
 	  //Just in case we don't have enough memory:)
           //print_payload(buf, header_length);
@@ -4813,9 +4811,7 @@ void SF_packet_header_handler(struct channels_list_entry *chptr, struct packet_p
 	   } else {
            	  pdata->primitives.packet_payload[0] = '\0';
            }
-  } else {
-      pdata->primitives.packet_payload[0] = '\0'; 
- }
+  }
  
 }
 
