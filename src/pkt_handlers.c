@@ -4777,10 +4777,10 @@ void SF_packet_payload_handler(struct channels_list_entry *chptr, struct packet_
 		sprintf(&pdata->primitives.packet_payload[sizeof(pdata->primitives.packet_payload) - 8],"%d.", payload_length);
 		pdata->primitives.packet_payload[sizeof(pdata->primitives.packet_payload) - 1] = '\0';
         } else {
-		pdata->primitives.packet_payload[0] = '1';
+		pdata->primitives.packet_payload[0] = '\0';
 	}
   } else {
-      pdata->primitives.packet_payload[0] = '2';
+      pdata->primitives.packet_payload[0] = '\0';
  }
   
 }
@@ -4789,8 +4789,8 @@ void SF_packet_header_handler(struct channels_list_entry *chptr, struct packet_p
 {
   struct pkt_data *pdata = (struct pkt_data *) *data;
   SFSample *sample = (SFSample *) pptrs->f_data;
-  //int header_length = sample->offsetToPayload;
-  int header_length = sample->headerLen;
+  //int header_length = sample->header_bytes;
+  int header_length = sample->offsetToPayload;
   int packet_length = sample->sampledPacketSize;
   u_char buf[(header_length) + 9];
   int size_c, inc;
@@ -4805,15 +4805,16 @@ void SF_packet_header_handler(struct channels_list_entry *chptr, struct packet_p
 	  if (header_length <= inc) {
 		  memcpy(buf, sample->header,header_length);
 		  //print_payload(buf, header_length);
+		  //printf("---------------------\n");
 		  if (size_c <= sizeof(pdata->primitives.packet_header)) memcpy(pdata->primitives.packet_header,buf,header_length);
 		  pdata->primitives.packet_header[sizeof(pdata->primitives.packet_header) - 1] = '\0';
 		  pdata->primitives.packet_header[sizeof(pdata->primitives.packet_header) - 2] = header_length;
 		  sprintf(&pdata->primitives.packet_header[sizeof(pdata->primitives.packet_header) - 9],"%d.", packet_length);
 	   } else {
-           	  pdata->primitives.packet_payload[0] = '1';
+           	  pdata->primitives.packet_payload[0] = '\0';
            }
   } else {
-      pdata->primitives.packet_payload[0] = '2'; 
+      pdata->primitives.packet_payload[0] = '\0'; 
  }
  
 }

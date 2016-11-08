@@ -175,6 +175,7 @@ void decodeIPLayer4(SFSample *sample, u_char *ptr, u_int32_t ipProtocol) {
       memcpy(&icmp, ptr, sizeof(icmp));
       sample->dcd_sport = icmp.type;
       sample->dcd_dport = icmp.code;
+      sample->offsetToPayload = ptr + sizeof(icmp) - sample->header;
     }
     break;
   case 6: /* TCP */
@@ -184,12 +185,13 @@ void decodeIPLayer4(SFSample *sample, u_char *ptr, u_int32_t ipProtocol) {
       sample->dcd_sport = ntohs(tcp.th_sport);
       sample->dcd_dport = ntohs(tcp.th_dport);
       sample->dcd_tcpFlags = tcp.th_flags;
-      if(sample->dcd_dport == 80) {
+      //if(sample->dcd_dport == 80) {
 	int bytesLeft;
 	int headerBytes = (tcp.th_off_and_unused >> 4) * 4;
+	sample->offsetToPayload = ptr + headerBytes - sample->header;
 	ptr += headerBytes;
 	bytesLeft = sample->header + sample->headerLen - ptr;
-      }
+      //}
     }
     break;
   case 17: /* UDP */
@@ -199,9 +201,11 @@ void decodeIPLayer4(SFSample *sample, u_char *ptr, u_int32_t ipProtocol) {
       sample->dcd_sport = ntohs(udp.uh_sport);
       sample->dcd_dport = ntohs(udp.uh_dport);
       sample->udp_pduLen = ntohs(udp.uh_ulen);
+      sample->offsetToPayload = ptr + sizeof(udp) - sample->header;
     }
     break;
   default: /* some other protcol */
+    sample->offsetToPayload = ptr - sample->header;
     break;
   }
 }

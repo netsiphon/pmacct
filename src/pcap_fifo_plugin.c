@@ -181,14 +181,16 @@ void pcap_fifo_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 		  pipebuf_ptr = pipebuf+ChBufHdrSz;
 		  data = (struct pkt_data *) pipebuf_ptr;
 		  //print_payload(data->primitives.packet_header, sizeof(data->primitives.packet_header));
+		  //printf("---------------------\n");
 		  //print_payload(data->primitives.packet_payload, sizeof(data->primitives.packet_payload));
+                  //printf("---------------------\n");
 		  if (*fifo_socket > -1 ) {
 				char fifo_output[2048];
 				int fifo_bytes;
 				
 				memset(fifo_output,0,sizeof(fifo_output));
 				memset(&fifo_bytes,0,sizeof(fifo_bytes));
-
+				
 				writePcapPacket(data, &fifo_bytes, fifo_output);
 				if (write_to_pcap_fifo(fifo_output, fifo_socket, &fifo_bytes) == -1) {
 					//unlink_pcap_fifo(fifo_name);
@@ -252,11 +254,10 @@ void writePcapPacket(struct pkt_data *pdata, int *bytes, char *output) {
   header_length = (int)pdata->primitives.packet_header[sizeof(pdata->primitives.packet_header) - 2];
   
   caplen_ptr = &pdata->primitives.packet_payload[payload_primitive_length];
-  memset(extract_length, 0, sizeof(extract_length) -1);
+  memset(extract_length, 0, sizeof(extract_length) - 1);
   memcpy(extract_length, caplen_ptr, sizeof(extract_length) - 1);
   //extract_length[sizeof(extract_length) - 1] = '\0';
   sscanf(extract_length, "%i", &payload_length);
-  
   
   truelen_ptr = &pdata->primitives.packet_header[header_primitive_length];
   memset(extract_true_length, 0, sizeof(extract_true_length) - 1);
@@ -272,8 +273,10 @@ void writePcapPacket(struct pkt_data *pdata, int *bytes, char *output) {
   
   
   cap_length = header_length + payload_length;
-  //printf("Captured Length:%d\n", cap_length);
-  //printf("True Length:%d\n", true_packet_length);
+  printf("Header Length:%d\n", header_length);
+  printf("Payload Length:%d\n", payload_length);
+  printf("Captured Length:%d\n", cap_length);
+  printf("True Length:%d\n", true_packet_length);
   if (true_packet_length < 0 || true_packet_length > 1518) true_packet_length = cap_length;
   
   hdr.ts.tv_sec = time(NULL);
@@ -297,6 +300,12 @@ void writePcapPacket(struct pkt_data *pdata, int *bytes, char *output) {
   
   memcpy(output, &buf, byteme); //Blech this is ugly
   *bytes = byteme;
+
+  print_payload(pdata->primitives.packet_header, sizeof(pdata->primitives.packet_header));
+  printf("---------------------\n");
+  print_payload(pdata->primitives.packet_payload, sizeof(pdata->primitives.packet_payload));
+  printf("---------------------\n");
+
 }
 /*_________________---------------------------__________________
   _________________   write_to_pcap_fifo         __________________
