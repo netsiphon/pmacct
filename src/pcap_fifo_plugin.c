@@ -265,7 +265,6 @@ void writePcapPacket(struct pkt_data *pdata, int *bytes, char *output) {
   //extract_true_length[sizeof(extract_true_length) - 1] = '\0';
   sscanf(extract_true_length, "%i", &true_packet_length);
   
-  
   if (payload_length > payload_primitive_length) payload_length = payload_primitive_length;
   else if (payload_length < 0) payload_length = 0;
   if (header_length > header_primitive_length) header_length = header_primitive_length;
@@ -273,14 +272,14 @@ void writePcapPacket(struct pkt_data *pdata, int *bytes, char *output) {
   
   
   cap_length = header_length + payload_length;
-  printf("Header Length:%d\n", header_length);
-  printf("Payload Length:%d\n", payload_length);
-  printf("Captured Length:%d\n", cap_length);
-  printf("True Length:%d\n", true_packet_length);
+  //printf("Header Length:%d\n", header_length);
+  //printf("Payload Length:%d\n", payload_length);
+  //printf("Captured Length:%d\n", cap_length);
+  //printf("True Length:%d\n", true_packet_length);
   if (true_packet_length < 0 || true_packet_length > 1518) true_packet_length = cap_length;
   
-  hdr.ts.tv_sec = time(NULL);
-  hdr.ts.tv_usec = 0;
+  hdr.ts_sec = time(NULL);
+  hdr.ts_usec = 666; //0;
   hdr.len = true_packet_length;
   hdr.caplen = cap_length;
   /*if(config.removeContent && sample->offsetToPayload) {
@@ -301,10 +300,10 @@ void writePcapPacket(struct pkt_data *pdata, int *bytes, char *output) {
   memcpy(output, &buf, byteme); //Blech this is ugly
   *bytes = byteme;
 
-  print_payload(pdata->primitives.packet_header, sizeof(pdata->primitives.packet_header));
-  printf("---------------------\n");
-  print_payload(pdata->primitives.packet_payload, sizeof(pdata->primitives.packet_payload));
-  printf("---------------------\n");
+  //print_payload(pdata->primitives.packet_header, sizeof(pdata->primitives.packet_header));
+  //printf("---------------------\n");
+  //print_payload(pdata->primitives.packet_payload, sizeof(pdata->primitives.packet_payload));
+  //printf("---------------------\n");
 
 }
 /*_________________---------------------------__________________

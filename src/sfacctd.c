@@ -1410,7 +1410,7 @@ void finalizeSample(SFSample *sample, struct packet_ptrs_vector *pptrsv, struct 
      - sample->gotIPV4 || sample->gotIPV6 : it belongs to either an IPv4 or IPv6 packet.
      - !sample->eth_type : we don't know the L3 protocol. VLAN or MPLS accounting case.
   */
-  if (sample->gotIPV4 || sample->gotIPV6 || !sample->eth_type) {
+  if (sample->gotIPV4 || sample->gotIPV6 || sample->eth_type) {
     reset_net_status_v(pptrsv);
     pptrs->flow_type = SF_evaluate_flow_type(pptrs);
 

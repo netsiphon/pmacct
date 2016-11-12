@@ -4770,6 +4770,8 @@ void SF_packet_payload_handler(struct channels_list_entry *chptr, struct packet_
   if (!buf<=1) {
 	memset(buf,0,sizeof(buf));
 	int size_c = sizeof(buf);
+
+	//printf("PayloadSize:%i\n",payload_length);
 	//Just in case we don't have enough memory:)
 	if (payload_length <= size_c - 8) {
 	
@@ -4798,6 +4800,7 @@ void SF_packet_header_handler(struct channels_list_entry *chptr, struct packet_p
 	  memset(buf,0,sizeof(buf));
 	  size_c = sizeof(buf);
 	  inc = size_c - 9;
+	  //printf("HeaderSize:%i\n",header_length);
 	  //Just in case we don't have enough memory:)
           //print_payload(buf, header_length);
 	  if (header_length <= inc) {

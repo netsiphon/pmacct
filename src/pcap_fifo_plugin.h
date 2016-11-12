@@ -60,7 +60,8 @@ EXT struct pcap_my_file_header {
   };
 
 EXT struct pcap_my_pkthdr {
-  struct timeval ts;	/* time stamp */
+  u_int32_t ts_sec;	/* time in seconds 32-bit */
+  u_int32_t ts_usec;	/* time microseconds 32-bit */
   u_int32_t caplen;	/* length of portion present */
   u_int32_t len;	/* length this packet (off wire) */
   /* some systems expect to see more information here. For example,
@@ -71,5 +72,6 @@ EXT struct pcap_my_pkthdr {
    * To pad the header with zeros, use the tcpdumpHdrPad option.
    */
 };
+
 
 #undef EXT
