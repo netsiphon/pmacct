@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2017 by Paolo Lucente
 */
 
 /*
@@ -118,6 +118,82 @@ pm_class_t SF_evaluate_classifiers(char *string)
   }
 
   return 0;
+}
+
+void evaluate_classifiers(struct packet_ptrs *pptrs, struct ip_flow_common *fp, unsigned int idx)
+{
+  struct pkt_classifier_data data;
+  int plen = (config.snaplen ? config.snaplen : DEFAULT_SNAPLEN);
+  unsigned int reverse = idx ? 0 : 1;
+  char payload[plen+1];
+  int j = 0, ret, cidx;
+  int max = pmct_get_num_entries();
+  void *cc_node = NULL, *cc_rev_node = NULL, *context = NULL;
+
+  prepare_classifier_data(&data, fp, idx, pptrs);
+  if (pptrs->new_flow) {
+    init_class_accumulators(pptrs, fp, idx);
+    search_conntrack(fp, pptrs, idx); 
+  }
+
+  /* Short circuit: a) if we have a class; b) if we have no more
+     tentatives to classify the packet. Otherwise continue */
+  if (fp->class[idx] || !fp->cst[idx].tentatives) {
+    pptrs->class = fp->class[idx];
+    handle_class_accumulators(pptrs, fp, idx);
+
+    /* do we have an helper ? If yes, let's run it ! */
+    if (fp->conntrack_helper) fp->conntrack_helper(fp->last[idx].tv_sec, pptrs);
+
+    return;
+  }
+
+  /* We will pre-process the payload section of the snapshot */
+  if (pptrs->payload_ptr) {
+    int caplen = ((struct pcap_pkthdr *)pptrs->pkthdr)->caplen - (pptrs->payload_ptr - pptrs->packet_ptr), x = 0, y = 0;
+ 
+    while (x < caplen && y < plen) {
+      if (pptrs->payload_ptr[x] != '\0') {
+        if (isascii(pptrs->payload_ptr[x])) payload[y] = tolower(pptrs->payload_ptr[x]);
+	else payload[y] = pptrs->payload_ptr[x];
+	y++;
+      }
+      x++;
+    }
+    payload[y] = '\0';
+
+    while (class[j].id && j < max) {
+      if (class[j].pattern) ret = pm_regexec(class[j].pattern, payload);
+      else if (*class[j].func) {
+	cc_node = search_context_chain(fp, idx, class[j].protocol);
+	cc_rev_node = search_context_chain(fp, reverse, class[j].protocol);
+	context = cc_node;
+	ret = (*class[j].func)(&data, caplen, &context, &cc_rev_node, &class[j].extra);
+	if (context && !cc_node) insert_context_chain(fp, idx, class[j].protocol, context);
+      }
+
+      if (ret) {
+        if (ret > 1 && ret < max && class[ret-1].id) cidx = ret-1;
+	else cidx = j;
+
+        fp->class[0] = class[cidx].id;
+        fp->class[1] = class[cidx].id;
+        pptrs->class = class[cidx].id;
+	handle_class_accumulators(pptrs, fp, idx);
+	if (class[cidx].ct_helper) {
+	  fp->conntrack_helper = class[cidx].ct_helper;
+	  fp->conntrack_helper(fp->last[idx].tv_sec, pptrs); 
+	}
+	else fp->conntrack_helper = NULL;
+        return;
+      }
+      j++;
+    }
+  }
+
+  fp->class[idx] = FALSE;
+  pptrs->class = FALSE;
+  handle_class_accumulators(pptrs, fp, idx);
 }
 
 void SF_evaluate_classifiers2(struct packet_ptrs *pptrs, struct ip_flow_common *fp, unsigned int idx)
@@ -330,7 +406,7 @@ void init_class_accumulators(struct packet_ptrs *pptrs, struct ip_flow_common *f
 
 void handle_class_accumulators(struct packet_ptrs *pptrs, struct ip_flow_common *fp, unsigned int idx)
 {
-  struct my_iphdr *iphp = (struct my_iphdr *)pptrs->iph_ptr; 
+  struct pm_iphdr *iphp = (struct pm_iphdr *)pptrs->iph_ptr; 
 #if defined ENABLE_IPV6
   struct ip6_hdr *ip6hp = (struct ip6_hdr *)pptrs->iph_ptr; 
 #endif
@@ -347,10 +423,16 @@ void handle_class_accumulators(struct packet_ptrs *pptrs, struct ip_flow_common 
       else if (pptrs->l3_proto == ETHERTYPE_IPV6)
 	fp->cst[idx].ba += (IP6HdrSz+ntohs(ip6hp->ip6_plen));
 #endif
+      if (pptrs->frag_sum_bytes) {
+	fp->cst[idx].ba += pptrs->frag_sum_bytes;
+	pptrs->frag_sum_bytes = 0;
+      }
+
       if (pptrs->new_flow) fp->cst[idx].fa++;
-      if (pptrs->pf) {
-	fp->cst[idx].pa += pptrs->pf;
-	pptrs->pf = 0;
+
+      if (pptrs->frag_sum_pkts) {
+	fp->cst[idx].pa += pptrs->frag_sum_pkts;
+	pptrs->frag_sum_pkts = 0;
       }
       fp->cst[idx].pa++;
       if (pptrs->payload_ptr) fp->cst[idx].tentatives--;
@@ -574,55 +656,6 @@ int parse_shared_object(char *fname, struct pkt_classifier *css)
 #endif
 }
 
-int pm_scandir(const char *dir, struct dirent ***namelist,
-            int (*select)(const struct dirent *),
-            int (*compar)(const void *, const void *))
-{
-  DIR *d;
-  struct dirent *entry;
-  register int i = 0;
-  size_t entrysize;
-
-  if ((d=opendir(dir)) == NULL) return(-1);
-
-  *namelist = NULL;
-  while ((entry=readdir(d)) != NULL)
-  {
-    if (select == NULL || (select != NULL && (*select)(entry)))
-    {
-      *namelist=(struct dirent **)realloc((void *)(*namelist), (size_t)((i+1)*sizeof(struct dirent *)));
-      if (*namelist == NULL)
-      {
-         closedir(d);
-         return(-1);
-      }
-      entrysize=sizeof(struct dirent)-sizeof(entry->d_name)+strlen(entry->d_name)+1;
-      (*namelist)[i]=(struct dirent *)malloc(entrysize);
-      if ((*namelist)[i] == NULL)
-      {
-        closedir(d);
-        return(-1);
-      }
-      memcpy((*namelist)[i], entry, entrysize);
-      i++;
-    }
-  }
-  if (closedir(d)) return(-1);
-  if (i == 0) return(-1);
-  if (compar != NULL)
-    qsort((void *)(*namelist), (size_t)i, sizeof(struct dirent *), compar);
-    
-  return(i);
-}
-
-int pm_alphasort(const void *a, const void *b)
-{
-  const struct dirent *dira = a;
-  const struct dirent *dirb = b;
-
-  return(strcmp(dira->d_name, dirb->d_name));
-}
-
 void link_conntrack_helper(struct pkt_classifier *css)
 {
   int index = 0;
@@ -757,6 +790,26 @@ pm_class_t pmct_register(struct pkt_classifier *css)
     memcpy(&class[css->id-1], css, sizeof(struct pkt_classifier));
     return css->id;
   } 
+  else return 0;
+}
+
+/* same as pmct_register but without the index decrement */
+pm_class_t pmct_ndpi_register(struct pkt_classifier *css)
+{
+  int max = pmct_get_num_entries();
+
+  if (!css) return 0;
+
+  /* let's check that a) a valid class ID has been supplied, b) the class ID
+     is still available. If this is the case, let's proceed with this entry,
+     otherwise we will switch to a default behaviour. */
+
+  if (!strcmp(css->protocol, "")) return 0;
+
+  if (css->id <= max && !class[css->id].id) {
+    memcpy(&class[css->id], css, sizeof(struct pkt_classifier));
+    return css->id;
+  }
   else return 0;
 }
 

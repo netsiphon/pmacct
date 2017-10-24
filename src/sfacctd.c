@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2017 by Paolo Lucente
 */
 
 /*
@@ -40,6 +40,15 @@
 #include "crc32.h"
 #include "isis/isis.h"
 #include "bmp/bmp.h"
+#ifdef WITH_RABBITMQ
+#include "amqp_common.h"
+#endif
+#ifdef WITH_KAFKA
+#include "kafka_common.h"
+#endif
+#if defined (WITH_NDPI)
+#include "ndpi/ndpi.h"
+#endif
 
 /* variables to be exported away */
 struct channels_list_entry channels_list[MAX_N_PLUGINS]; /* communication channels: core <-> plugins */
@@ -62,12 +71,14 @@ void usage_daemon(char *prog_name)
   printf("  -D  \tDaemonize\n"); 
   printf("  -n  \tPath to a file containing networks and/or ASNs definitions\n");
   printf("  -t  \tPath to a file containing ports definitions\n");
-  printf("  -P  \t[ memory | print | mysql | pgsql | sqlite3 | mongodb | amqp | kafka | tee ] \n\tActivate plugin\n"); 
+  printf("  -P  \t[ memory | print | mysql | pgsql | sqlite3 | amqp | kafka | tee ] \n\tActivate plugin\n"); 
   printf("  -d  \tEnable debug\n");
   printf("  -S  \t[ auth | mail | daemon | kern | user | local[0-7] ] \n\tLog to the specified syslog facility\n");
   printf("  -F  \tWrite Core Process PID into the specified file\n");
   printf("  -R  \tRenormalize sampled data\n");
   printf("  -u  \tLeave IP protocols in numerical format\n");
+  printf("  -I  \tRead packets from the specified savefile\n");
+  printf("  -W  \tReading from a savefile, don't exit but sleep when finished\n");
   printf("\nMemory plugin (-P memory) options:\n");
   printf("  -p  \tSocket for client-server communication (DEFAULT: /tmp/collect.pipe)\n");
   printf("  -b  \tNumber of buckets\n");
@@ -80,7 +91,9 @@ void usage_daemon(char *prog_name)
   printf("  -A  \tAppend output (applies to -o)\n");
   printf("  -E  \tCSV format serparator (applies to -O csv, DEFAULT: ',')\n");
   printf("\n");
-  printf("  See QUICKSTART or visit http://wiki.pmacct.net/ for examples.\n");
+  printf("For examples, see:\n");
+  printf("  https://github.com/pmacct/pmacct/blob/master/QUICKSTART or\n");
+  printf("  https://github.com/pmacct/pmacct/wiki\n");
   printf("\n");
   printf("For suggestions, critics, bugs, contact me: %s.\n", MANTAINER);
 }
@@ -92,7 +105,7 @@ int main(int argc,char **argv, char **envp)
   struct plugin_requests req;
   struct packet_ptrs_vector pptrs;
   char config_file[SRVBUFLEN];
-  unsigned char sflow_packet[SFLOW_MAX_MSG_SIZE];
+  unsigned char *sflow_packet;
   int logf, rc, yes=1, no=0, allowed;
   struct host_addr addr;
   struct hosts_table allow;
@@ -115,6 +128,8 @@ int main(int argc,char **argv, char **envp)
 #endif
   int clen = sizeof(client), slen;
   struct ip_mreq multi_req4;
+
+  struct pcap_device device;
 
   unsigned char dummy_packet[64]; 
   unsigned char dummy_packet_vlan[64]; 
@@ -146,7 +161,7 @@ int main(int argc,char **argv, char **envp)
 #endif
 
   umask(077);
-  compute_once();
+  SF_compute_once();
 
   /* a bunch of default definitions */ 
   reload_map = FALSE;
@@ -162,6 +177,7 @@ int main(int argc,char **argv, char **envp)
   sampling_map_caching = TRUE;
   find_id_func = SF_find_id;
   plugins_list = NULL;
+  sflow_packet = malloc(SFLOW_MAX_MSG_SIZE);
 
   data_plugins = 0;
   tee_plugins = 0;
@@ -307,6 +323,15 @@ int main(int argc,char **argv, char **envp)
       strlcpy(cfg_cmdline[rows], "sfacctd_renormalize: true", SRVBUFLEN);
       rows++;
       break;
+    case 'I':
+      strlcpy(cfg_cmdline[rows], "pcap_savefile: ", SRVBUFLEN);
+      strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
+      rows++;
+      break;
+    case 'W':
+      strlcpy(cfg_cmdline[rows], "pcap_savefile_wait: true", SRVBUFLEN);
+      rows++;
+      break;
     case 'h':
       usage_daemon(argv[0]);
       exit(0);
@@ -438,21 +463,18 @@ int main(int argc,char **argv, char **envp)
                         COUNT_MPLS_STACK_DEPTH))
           list->cfg.data_type |= PIPE_TYPE_MPLS;
 
+	if (list->cfg.what_to_count_2 & (COUNT_TUNNEL_SRC_HOST|COUNT_TUNNEL_DST_HOST|
+			COUNT_TUNNEL_IP_PROTO|COUNT_TUNNEL_IP_TOS))
+	  list->cfg.data_type |= PIPE_TYPE_TUN;
+
         if (list->cfg.what_to_count_2 & (COUNT_LABEL))
           list->cfg.data_type |= PIPE_TYPE_VLEN;
 
-	evaluate_sums(&list->cfg.what_to_count, list->name, list->type.string);
+	evaluate_sums(&list->cfg.what_to_count, &list->cfg.what_to_count_2, list->name, list->type.string);
 	if (!list->cfg.what_to_count && !list->cfg.what_to_count_2 && !list->cfg.cpptrs.num) {
 	  Log(LOG_WARNING, "WARN ( %s/%s ): defaulting to SRC HOST aggregation.\n", list->name, list->type.string);
 	  //list->cfg.what_to_count |= COUNT_SRC_HOST;
 	}
-        if (((list->cfg.what_to_count & COUNT_SRC_HOST) && (list->cfg.what_to_count & COUNT_SRC_NET)) ||
-            ((list->cfg.what_to_count & COUNT_DST_HOST) && (list->cfg.what_to_count & COUNT_DST_NET))) {
-          if (!list->cfg.tmp_net_own_field) {
-            Log(LOG_ERR, "ERROR ( %s/%s ): src_host, src_net and dst_host, dst_net are mutually exclusive: set tmp_net_own_field to true. Exiting...\n\n", list->name, list->type.string);
-            exit(1);
-          }
-        }
 	if (list->cfg.what_to_count & (COUNT_SRC_AS|COUNT_DST_AS|COUNT_SUM_AS)) {
 	  if (!list->cfg.networks_file && list->cfg.nfacctd_as & NF_AS_NEW) {
 	    Log(LOG_ERR, "ERROR ( %s/%s ): AS aggregation was selected but NO 'networks_file' specified. Exiting...\n\n", list->name, list->type.string);
@@ -483,8 +505,19 @@ int main(int argc,char **argv, char **envp)
               list->cfg.nfacctd_net |= NF_NET_NEW;
           }
         }
+
 	if (list->cfg.what_to_count & COUNT_CLASS && !list->cfg.classifiers_path) {
 	  Log(LOG_ERR, "ERROR ( %s/%s ): 'class' aggregation selected but NO 'classifiers' key specified. Exiting...\n\n", list->name, list->type.string);
+	  exit(1);
+	}
+
+	if (list->cfg.what_to_count_2 & COUNT_NDPI_CLASS) {
+          config.handle_fragments = TRUE;
+          config.classifier_ndpi = TRUE;
+	}
+
+	if ((list->cfg.what_to_count & COUNT_CLASS) && (list->cfg.what_to_count_2 & COUNT_NDPI_CLASS)) {
+	  Log(LOG_ERR, "ERROR ( %s/%s ): 'class_legacy' and 'class' primitives are mutual exclusive. Exiting...\n\n", list->name, list->type.string);
 	  exit(1);
 	}
 
@@ -504,6 +537,11 @@ int main(int argc,char **argv, char **envp)
     exit(1);
   }
 
+  if (config.pcap_savefile && (config.nfacctd_port || config.nfacctd_ip)) {
+    Log(LOG_ERR, "ERROR ( %s/core ): 'pcap_savefile' is mutual exclusive with live collection, ie. 'sfacctd_ip' and/or 'sfacctd_port' Exiting...\n\n", config.name);
+    exit(1);
+  }
+
   /* signal handling we want to inherit to plugins (when not re-defined elsewhere) */
   signal(SIGCHLD, startup_handle_falling_child); /* takes note of plugins failed during startup phase */
   signal(SIGHUP, reload); /* handles reopening of syslog channel */
@@ -511,42 +549,24 @@ int main(int argc,char **argv, char **envp)
   signal(SIGUSR2, reload_maps); /* sets to true the reload_maps flag */
   signal(SIGPIPE, SIG_IGN); /* we want to exit gracefully when a pipe is broken */
 
-  /* If no IP address is supplied, let's set our default
-     behaviour: IPv4 address, INADDR_ANY, port 2100 */
-  if (!config.nfacctd_port) config.nfacctd_port = DEFAULT_SFACCTD_PORT;
-#if (defined ENABLE_IPV6)
-  if (!config.nfacctd_ip) {
-    struct sockaddr_in6 *sa6 = (struct sockaddr_in6 *)&server;
-
-    sa6->sin6_family = AF_INET6;
-    sa6->sin6_port = htons(config.nfacctd_port);
-    slen = sizeof(struct sockaddr_in6);
+  if (config.pcap_savefile) {
+    open_pcap_savefile(&device, config.pcap_savefile);
+    config.handle_fragments = TRUE;
+    init_ip_fragment_handler();
   }
-#else
-  if (!config.nfacctd_ip) {
-    struct sockaddr_in *sa4 = (struct sockaddr_in *)&server;
-
-    sa4->sin_family = AF_INET;
-    sa4->sin_addr.s_addr = htonl(0);
-    sa4->sin_port = htons(config.nfacctd_port);
-    slen = sizeof(struct sockaddr_in);
-  }
-#endif
   else {
-    trim_spaces(config.nfacctd_ip);
-    ret = str_to_addr(config.nfacctd_ip, &addr);
-    if (!ret) {
-      Log(LOG_ERR, "ERROR ( %s/core ): 'sfacctd_ip' value is not valid. Exiting.\n", config.name);
-      exit(1);
-    }
-    slen = addr_to_sa((struct sockaddr *)&server, &addr, config.nfacctd_port);
-  }
-
-  /* socket creation */
-  config.sock = socket(((struct sockaddr *)&server)->sa_family, SOCK_DGRAM, 0);
-  if (config.sock < 0) {
+    /* If no IP address is supplied, let's set our default
+       behaviour: IPv4 address, INADDR_ANY, port 2100 */
+    if (!config.nfacctd_port) config.nfacctd_port = DEFAULT_SFACCTD_PORT;
 #if (defined ENABLE_IPV6)
-    /* retry with IPv4 */
+    if (!config.nfacctd_ip) {
+      struct sockaddr_in6 *sa6 = (struct sockaddr_in6 *)&server;
+
+      sa6->sin6_family = AF_INET6;
+      sa6->sin6_port = htons(config.nfacctd_port);
+      slen = sizeof(struct sockaddr_in6);
+    }
+#else
     if (!config.nfacctd_ip) {
       struct sockaddr_in *sa4 = (struct sockaddr_in *)&server;
 
@@ -554,37 +574,58 @@ int main(int argc,char **argv, char **envp)
       sa4->sin_addr.s_addr = htonl(0);
       sa4->sin_port = htons(config.nfacctd_port);
       slen = sizeof(struct sockaddr_in);
-
-      config.sock = socket(((struct sockaddr *)&server)->sa_family, SOCK_DGRAM, 0);
     }
 #endif
-
-    if (config.sock < 0) {
-      Log(LOG_ERR, "ERROR ( %s/core ): socket() failed.\n", config.name);
-      exit(1);
+    else {
+      trim_spaces(config.nfacctd_ip);
+      ret = str_to_addr(config.nfacctd_ip, &addr);
+      if (!ret) {
+        Log(LOG_ERR, "ERROR ( %s/core ): 'sfacctd_ip' value is not valid. Exiting.\n", config.name);
+        exit(1);
+      }
+      slen = addr_to_sa((struct sockaddr *)&server, &addr, config.nfacctd_port);
     }
-  }
 
-  /* bind socket to port */
-  rc = setsockopt(config.sock, SOL_SOCKET, SO_REUSEADDR, (char *)&yes, sizeof(yes));
-  if (rc < 0) Log(LOG_ERR, "WARN ( %s/core ): setsockopt() failed for SO_REUSEADDR.\n", config.name);
+    /* socket creation */
+    config.sock = socket(((struct sockaddr *)&server)->sa_family, SOCK_DGRAM, 0);
+    if (config.sock < 0) {
+#if (defined ENABLE_IPV6)
+      /* retry with IPv4 */
+      if (!config.nfacctd_ip) {
+        struct sockaddr_in *sa4 = (struct sockaddr_in *)&server;
+
+        sa4->sin_family = AF_INET;
+        sa4->sin_addr.s_addr = htonl(0);
+        sa4->sin_port = htons(config.nfacctd_port);
+        slen = sizeof(struct sockaddr_in);
+
+        config.sock = socket(((struct sockaddr *)&server)->sa_family, SOCK_DGRAM, 0);
+      }
+#endif
+
+      if (config.sock < 0) {
+        Log(LOG_ERR, "ERROR ( %s/core ): socket() failed.\n", config.name);
+        exit(1);
+      }
+    }
+
+    /* bind socket to port */
+    rc = setsockopt(config.sock, SOL_SOCKET, SO_REUSEADDR, (char *)&yes, sizeof(yes));
+    if (rc < 0) Log(LOG_ERR, "WARN ( %s/core ): setsockopt() failed for SO_REUSEADDR.\n", config.name);
 
 #if (defined ENABLE_IPV6) && (defined IPV6_BINDV6ONLY)
-  rc = setsockopt(config.sock, IPPROTO_IPV6, IPV6_BINDV6ONLY, (char *) &no, (socklen_t) sizeof(no));
-  if (rc < 0) Log(LOG_ERR, "WARN ( %s/core ): setsockopt() failed for IPV6_BINDV6ONLY.\n", config.name);
+    rc = setsockopt(config.sock, IPPROTO_IPV6, IPV6_BINDV6ONLY, (char *) &no, (socklen_t) sizeof(no));
+    if (rc < 0) Log(LOG_ERR, "WARN ( %s/core ): setsockopt() failed for IPV6_BINDV6ONLY.\n", config.name);
 #endif
 
-  if (config.nfacctd_pipe_size) {
-    int l = sizeof(config.nfacctd_pipe_size);
-    int saved = 0, obtained = 0;
+    if (config.nfacctd_pipe_size) {
+      int l = sizeof(config.nfacctd_pipe_size);
+      int saved = 0, obtained = 0;
 
-    getsockopt(config.sock, SOL_SOCKET, SO_RCVBUF, &saved, &l);
-    Setsocksize(config.sock, SOL_SOCKET, SO_RCVBUF, &config.nfacctd_pipe_size, sizeof(config.nfacctd_pipe_size));
-    getsockopt(config.sock, SOL_SOCKET, SO_RCVBUF, &obtained, &l);
-
-    if (obtained < saved) {
-      Setsocksize(config.sock, SOL_SOCKET, SO_RCVBUF, &saved, l);
+      getsockopt(config.sock, SOL_SOCKET, SO_RCVBUF, &saved, &l);
+      Setsocksize(config.sock, SOL_SOCKET, SO_RCVBUF, &config.nfacctd_pipe_size, sizeof(config.nfacctd_pipe_size));
       getsockopt(config.sock, SOL_SOCKET, SO_RCVBUF, &obtained, &l);
+<<<<<<< HEAD
     }
     Log(LOG_INFO, "INFO ( %s/core ): sfacctd_pipe_size: obtained=%d target=%d.\n", config.name, obtained, config.nfacctd_pipe_size);
   }
@@ -597,18 +638,37 @@ int main(int argc,char **argv, char **envp)
       if (setsockopt(config.sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, (char *)&multi_req4, sizeof(multi_req4)) < 0) {
 	Log(LOG_ERR, "ERROR ( %s/core ): IPv4 multicast address - ADD membership failed.\n", config.name);
 	exit(1);
+=======
+
+      if (obtained < saved) {
+        Setsocksize(config.sock, SOL_SOCKET, SO_RCVBUF, &saved, l);
+        getsockopt(config.sock, SOL_SOCKET, SO_RCVBUF, &obtained, &l);
+>>>>>>> 00cd756a55f954e1bcf34b2ad6e04df2e182ab2e
       }
+      Log(LOG_INFO, "INFO ( %s/core ): sfacctd_pipe_size: obtained=%d target=%d.\n", config.name, obtained, config.nfacctd_pipe_size);
     }
+
+    /* Multicast: memberships handling */
+    for (idx = 0; mcast_groups[idx].family && idx < MAX_MCAST_GROUPS; idx++) {
+      if (mcast_groups[idx].family == AF_INET) {
+        memset(&multi_req4, 0, sizeof(multi_req4));
+        multi_req4.imr_multiaddr.s_addr = mcast_groups[idx].address.ipv4.s_addr;
+        if (setsockopt(config.sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, (char *)&multi_req4, sizeof(multi_req4)) < 0) {
+	  Log(LOG_ERR, "ERROR ( %s/core ): IPv4 multicast address - ADD membership failed.\n", config.name);
+	  exit(1);
+	}
+      }
 #if defined ENABLE_IPV6
-    if (mcast_groups[idx].family == AF_INET6) {
-      memset(&multi_req6, 0, sizeof(multi_req6));
-      ip6_addr_cpy(&multi_req6.ipv6mr_multiaddr, &mcast_groups[idx].address.ipv6);
-      if (setsockopt(config.sock, IPPROTO_IPV6, IPV6_JOIN_GROUP, (char *)&multi_req6, sizeof(multi_req6)) < 0) {
-	Log(LOG_ERR, "ERROR ( %s/core ): IPv6 multicast address - ADD membership failed.\n", config.name);
-	exit(1);
+      if (mcast_groups[idx].family == AF_INET6) {
+	memset(&multi_req6, 0, sizeof(multi_req6));
+	ip6_addr_cpy(&multi_req6.ipv6mr_multiaddr, &mcast_groups[idx].address.ipv6);
+	if (setsockopt(config.sock, IPPROTO_IPV6, IPV6_JOIN_GROUP, (char *)&multi_req6, sizeof(multi_req6)) < 0) {
+	  Log(LOG_ERR, "ERROR ( %s/core ): IPv6 multicast address - ADD membership failed.\n", config.name);
+	  exit(1);
+	}
       }
-    }
 #endif
+    }
   }
 
   if (config.nfacctd_allow_file) load_allow_file(config.nfacctd_allow_file, &allow);
@@ -738,13 +798,24 @@ int main(int argc,char **argv, char **envp)
   }
 #endif
 
-  rc = bind(config.sock, (struct sockaddr *) &server, slen);
-  if (rc < 0) {
-    Log(LOG_ERR, "ERROR ( %s/core ): bind() to ip=%s port=%d/udp failed (errno: %d).\n", config.name, config.nfacctd_ip, config.nfacctd_port, errno);
-    exit(1);
+  if (!config.pcap_savefile) {
+    rc = bind(config.sock, (struct sockaddr *) &server, slen);
+    if (rc < 0) {
+      Log(LOG_ERR, "ERROR ( %s/core ): bind() to ip=%s port=%d/udp failed (errno: %d).\n", config.name, config.nfacctd_ip, config.nfacctd_port, errno);
+      exit(1);
+    }
   }
 
   if (config.classifiers_path) init_classifiers(config.classifiers_path);
+
+#if defined (WITH_NDPI)
+  if (config.classifier_ndpi) {
+    config.handle_fragments = TRUE;
+    pm_ndpi_wfl = pm_ndpi_workflow_init();
+    pm_ndpi_export_proto_to_class(pm_ndpi_wfl);
+  }
+  else pm_ndpi_wfl = NULL;
+#endif
 
   /* plugins glue: creation */
   load_plugins(&req);
@@ -754,7 +825,7 @@ int main(int argc,char **argv, char **envp)
   if (config.pidfile) write_pid_file(config.pidfile);
   load_networks(config.networks_file, &nt, &nc);
 
-  /* signals to be handled only by pmacctd;
+  /* signals to be handled only by the core process;
      we set proper handlers after plugin creation */
   signal(SIGINT, my_sigint_handler);
   signal(SIGTERM, my_sigint_handler);
@@ -772,9 +843,9 @@ int main(int argc,char **argv, char **envp)
   Assign16(((struct eth_header *)pptrs.v4.packet_ptr)->ether_type, htons(ETHERTYPE_IP)); /* 0x800 */
   pptrs.v4.mac_ptr = (u_char *)((struct eth_header *)pptrs.v4.packet_ptr)->ether_dhost; 
   pptrs.v4.iph_ptr = pptrs.v4.packet_ptr + ETHER_HDRLEN; 
-  pptrs.v4.tlh_ptr = pptrs.v4.packet_ptr + ETHER_HDRLEN + sizeof(struct my_iphdr); 
-  Assign8(((struct my_iphdr *)pptrs.v4.iph_ptr)->ip_vhl, 5);
-  // pptrs.v4.pkthdr->caplen = 38; /* eth_header + my_iphdr + my_tlhdr */
+  pptrs.v4.tlh_ptr = pptrs.v4.packet_ptr + ETHER_HDRLEN + sizeof(struct pm_iphdr); 
+  Assign8(((struct pm_iphdr *)pptrs.v4.iph_ptr)->ip_vhl, 5);
+  // pptrs.v4.pkthdr->caplen = 38; /* eth_header + pm_iphdr + pm_tlhdr */
   pptrs.v4.pkthdr->caplen = 55;
   pptrs.v4.pkthdr->len = 100; /* fake len */ 
   pptrs.v4.l3_proto = ETHERTYPE_IP;
@@ -789,9 +860,9 @@ int main(int argc,char **argv, char **envp)
   pptrs.vlan4.vlan_ptr = pptrs.vlan4.packet_ptr + ETHER_HDRLEN;
   Assign16(*(pptrs.vlan4.vlan_ptr+2), htons(ETHERTYPE_IP));
   pptrs.vlan4.iph_ptr = pptrs.vlan4.packet_ptr + ETHER_HDRLEN + IEEE8021Q_TAGLEN;
-  pptrs.vlan4.tlh_ptr = pptrs.vlan4.packet_ptr + ETHER_HDRLEN + IEEE8021Q_TAGLEN + sizeof(struct my_iphdr);
-  Assign8(((struct my_iphdr *)pptrs.vlan4.iph_ptr)->ip_vhl, 5);
-  // pptrs.vlan4.pkthdr->caplen = 42; /* eth_header + vlan + my_iphdr + my_tlhdr */
+  pptrs.vlan4.tlh_ptr = pptrs.vlan4.packet_ptr + ETHER_HDRLEN + IEEE8021Q_TAGLEN + sizeof(struct pm_iphdr);
+  Assign8(((struct pm_iphdr *)pptrs.vlan4.iph_ptr)->ip_vhl, 5);
+  // pptrs.vlan4.pkthdr->caplen = 42; /* eth_header + vlan + pm_iphdr + pm_tlhdr */
   pptrs.vlan4.pkthdr->caplen = 59;
   pptrs.vlan4.pkthdr->len = 100; /* fake len */
   pptrs.vlan4.l3_proto = ETHERTYPE_IP;
@@ -804,7 +875,7 @@ int main(int argc,char **argv, char **envp)
   Assign16(((struct eth_header *)pptrs.mpls4.packet_ptr)->ether_type, htons(ETHERTYPE_MPLS));
   pptrs.mpls4.mac_ptr = (u_char *)((struct eth_header *)pptrs.mpls4.packet_ptr)->ether_dhost;
   pptrs.mpls4.mpls_ptr = pptrs.mpls4.packet_ptr + ETHER_HDRLEN;
-  // pptrs.mpls4.pkthdr->caplen = 78; /* eth_header + upto 10 MPLS labels + my_iphdr + my_tlhdr */
+  // pptrs.mpls4.pkthdr->caplen = 78; /* eth_header + upto 10 MPLS labels + pm_iphdr + pm_tlhdr */
   pptrs.mpls4.pkthdr->caplen = 95;
   pptrs.mpls4.pkthdr->len = 100; /* fake len */
   pptrs.mpls4.l3_proto = ETHERTYPE_IP;
@@ -819,7 +890,7 @@ int main(int argc,char **argv, char **envp)
   pptrs.vlanmpls4.vlan_ptr = pptrs.vlanmpls4.packet_ptr + ETHER_HDRLEN;
   Assign16(*(pptrs.vlanmpls4.vlan_ptr+2), htons(ETHERTYPE_MPLS));
   pptrs.vlanmpls4.mpls_ptr = pptrs.vlanmpls4.packet_ptr + ETHER_HDRLEN + IEEE8021Q_TAGLEN;
-  // pptrs.vlanmpls4.pkthdr->caplen = 82; /* eth_header + vlan + upto 10 MPLS labels + my_iphdr + my_tlhdr */
+  // pptrs.vlanmpls4.pkthdr->caplen = 82; /* eth_header + vlan + upto 10 MPLS labels + pm_iphdr + pm_tlhdr */
   pptrs.vlanmpls4.pkthdr->caplen = 99;
   pptrs.vlanmpls4.pkthdr->len = 100; /* fake len */
   pptrs.vlanmpls4.l3_proto = ETHERTYPE_IP;
@@ -836,7 +907,7 @@ int main(int argc,char **argv, char **envp)
   pptrs.v6.tlh_ptr = pptrs.v6.packet_ptr + ETHER_HDRLEN + sizeof(struct ip6_hdr);
   Assign16(((struct ip6_hdr *)pptrs.v6.iph_ptr)->ip6_plen, htons(100));
   Assign16(((struct ip6_hdr *)pptrs.v6.iph_ptr)->ip6_hlim, htons(64));
-  // pptrs.v6.pkthdr->caplen = 60; /* eth_header + ip6_hdr + my_tlhdr */
+  // pptrs.v6.pkthdr->caplen = 60; /* eth_header + ip6_hdr + pm_tlhdr */
   pptrs.v6.pkthdr->caplen = 77;
   pptrs.v6.pkthdr->len = 100; /* fake len */
   pptrs.v6.l3_proto = ETHERTYPE_IPV6;
@@ -855,7 +926,7 @@ int main(int argc,char **argv, char **envp)
   pptrs.vlan6.tlh_ptr = pptrs.vlan6.packet_ptr + ETHER_HDRLEN + IEEE8021Q_TAGLEN + sizeof(struct ip6_hdr);
   Assign16(((struct ip6_hdr *)pptrs.vlan6.iph_ptr)->ip6_plen, htons(100));
   Assign16(((struct ip6_hdr *)pptrs.vlan6.iph_ptr)->ip6_hlim, htons(64));
-  // pptrs.vlan6.pkthdr->caplen = 64; /* eth_header + vlan + ip6_hdr + my_tlhdr */
+  // pptrs.vlan6.pkthdr->caplen = 64; /* eth_header + vlan + ip6_hdr + pm_tlhdr */
   pptrs.vlan6.pkthdr->caplen = 81;
   pptrs.vlan6.pkthdr->len = 100; /* fake len */
   pptrs.vlan6.l3_proto = ETHERTYPE_IPV6;
@@ -868,7 +939,7 @@ int main(int argc,char **argv, char **envp)
   Assign16(((struct eth_header *)pptrs.mpls6.packet_ptr)->ether_type, htons(ETHERTYPE_MPLS));
   pptrs.mpls6.mac_ptr = (u_char *)((struct eth_header *)pptrs.mpls6.packet_ptr)->ether_dhost;
   pptrs.mpls6.mpls_ptr = pptrs.mpls6.packet_ptr + ETHER_HDRLEN;
-  // pptrs.mpls6.pkthdr->caplen = 100; /* eth_header + upto 10 MPLS labels + ip6_hdr + my_tlhdr */
+  // pptrs.mpls6.pkthdr->caplen = 100; /* eth_header + upto 10 MPLS labels + ip6_hdr + pm_tlhdr */
   pptrs.mpls6.pkthdr->caplen = 117;
   pptrs.mpls6.pkthdr->len = 128; /* fake len */
   pptrs.mpls6.l3_proto = ETHERTYPE_IPV6;
@@ -884,13 +955,13 @@ int main(int argc,char **argv, char **envp)
   Assign8(*(pptrs.vlanmpls6.vlan_ptr+2), 0x88);
   Assign8(*(pptrs.vlanmpls6.vlan_ptr+3), 0x47);
   pptrs.vlanmpls6.mpls_ptr = pptrs.vlanmpls6.packet_ptr + ETHER_HDRLEN + IEEE8021Q_TAGLEN;
-  // pptrs.vlanmpls6.pkthdr->caplen = 104; /* eth_header + vlan + upto 10 MPLS labels + ip6_hdr + my_tlhdr */
+  // pptrs.vlanmpls6.pkthdr->caplen = 104; /* eth_header + vlan + upto 10 MPLS labels + ip6_hdr + pm_tlhdr */
   pptrs.vlanmpls6.pkthdr->caplen = 121;
   pptrs.vlanmpls6.pkthdr->len = 128; /* fake len */
   pptrs.vlanmpls6.l3_proto = ETHERTYPE_IP;
 #endif
 
-  {
+  if (!config.pcap_savefile) {
     char srv_string[INET6_ADDRSTRLEN];
     struct host_addr srv_addr;
     u_int16_t srv_port;
@@ -899,6 +970,11 @@ int main(int argc,char **argv, char **envp)
     addr_to_str(srv_string, &srv_addr);
     Log(LOG_INFO, "INFO ( %s/core ): waiting for sFlow data on %s:%u\n", config.name, srv_string, srv_port);
     allowed = TRUE;
+  }
+  else {
+    Log(LOG_INFO, "INFO ( %s/core ): reading NetFlow/IPFIX data from: %s\n", config.name, config.pcap_savefile);
+    allowed = TRUE;
+    sleep(2);
   }
 
   if (config.sfacctd_counter_file || config.sfacctd_counter_amqp_routing_key || config.sfacctd_counter_kafka_topic) {
@@ -956,7 +1032,12 @@ int main(int argc,char **argv, char **envp)
 
   /* Main loop */
   for (;;) {
-    ret = recvfrom(config.sock, sflow_packet, SFLOW_MAX_MSG_SIZE, 0, (struct sockaddr *) &client, &clen);
+    if (!config.pcap_savefile) {
+      ret = recvfrom(config.sock, sflow_packet, SFLOW_MAX_MSG_SIZE, 0, (struct sockaddr *) &client, &clen);
+    }
+    else {
+      ret = recvfrom_savefile(&device, (void **) &sflow_packet, (struct sockaddr *) &client, &spp.ts);
+    }
     spp.rawSample = pptrs.v4.f_header = sflow_packet;
     spp.rawSampleLen = pptrs.v4.f_len = ret;
     spp.datap = (u_int32_t *) spp.rawSample;
@@ -975,6 +1056,8 @@ int main(int argc,char **argv, char **envp)
     if (reload_map) {
       bta_map_caching = TRUE;
       sampling_map_caching = TRUE;
+
+      if (config.nfacctd_allow_file) load_allow_file(config.nfacctd_allow_file, &allow);
 
       load_networks(config.networks_file, &nt, &nc);
 
@@ -1014,7 +1097,8 @@ int main(int argc,char **argv, char **envp)
 
     if (sfacctd_counter_backend_methods) {
       gettimeofday(&sf_cnt_misc_db->log_tstamp, NULL);
-      compose_timestamp(sf_cnt_misc_db->log_tstamp_str, SRVBUFLEN, &sf_cnt_misc_db->log_tstamp, TRUE, config.timestamps_since_epoch);
+      compose_timestamp(sf_cnt_misc_db->log_tstamp_str, SRVBUFLEN, &sf_cnt_misc_db->log_tstamp, TRUE,
+			config.timestamps_since_epoch, config.timestamps_rfc3339, config.timestamps_utc);
 
 #ifdef WITH_RABBITMQ
       if (config.sfacctd_counter_amqp_routing_key) {
@@ -1146,7 +1230,7 @@ SFv2v4_read_sampleType:
       readv2v4FlowSample(spp, pptrsv, req);
       break;
     case SFLCOUNTERS_SAMPLE:
-      readv2v4CountersSample(spp);
+      readv2v4CountersSample(spp, pptrsv);
       break;
     default:
       SF_notify_malf_packet(LOG_INFO, "INFO: Discarding unknown v2/v4 sample", (struct sockaddr *) pptrsv->v4.f_agent);
@@ -1197,13 +1281,13 @@ SFv5_read_sampleType:
       readv5FlowSample(spp, FALSE, pptrsv, req, TRUE);
       break;
     case SFLCOUNTERS_SAMPLE:
-      readv5CountersSample(spp, FALSE, pptrsv, req);
+      readv5CountersSample(spp, FALSE, pptrsv);
       break;
     case SFLFLOW_SAMPLE_EXPANDED:
       readv5FlowSample(spp, TRUE, pptrsv, req, TRUE);
       break;
     case SFLCOUNTERS_SAMPLE_EXPANDED:
-      readv5CountersSample(spp, TRUE, pptrsv, req);
+      readv5CountersSample(spp, TRUE, pptrsv);
       break;
     case SFLACL_BROCADE_SAMPLE:
       getData32(spp); /* trash: sample length */
@@ -1214,7 +1298,7 @@ SFv5_read_sampleType:
     default:
       SF_notify_malf_packet(LOG_INFO, "INFO: Discarding unknown v5 sample", (struct sockaddr *) pptrsv->v4.f_agent);
       xflow_tot_bad_datagrams++;
-      return; /* unexpected sampleType; aborting packet */ 
+      return; /* unexpected sampleType; aborting packet */
     }
     if ((u_char *)spp->datap > spp->endp) return; 
   }
@@ -1340,7 +1424,7 @@ void process_SF_raw_packet(SFSample *spp, struct packet_ptrs_vector *pptrsv,
   exec_plugins(pptrs, req);
 }
 
-void compute_once()
+void SF_compute_once()
 {
   struct pkt_data dummy;
 
@@ -1353,13 +1437,14 @@ void compute_once()
   PlbgpSz = sizeof(struct pkt_legacy_bgp_primitives);
   PnatSz = sizeof(struct pkt_nat_primitives);
   PmplsSz = sizeof(struct pkt_mpls_primitives);
+  PtunSz = sizeof(struct pkt_tunnel_primitives);
   PvhdrSz = sizeof(struct pkt_vlen_hdr_primitives);
   PmLabelTSz = sizeof(pm_label_t);
   PtLabelTSz = sizeof(pt_label_t);
   ChBufHdrSz = sizeof(struct ch_buf_hdr);
   CharPtrSz = sizeof(char *);
-  IP4HdrSz = sizeof(struct my_iphdr);
-  IP4TlSz = sizeof(struct my_iphdr)+sizeof(struct my_tlhdr);
+  IP4HdrSz = sizeof(struct pm_iphdr);
+  IP4TlSz = sizeof(struct pm_iphdr)+sizeof(struct pm_tlhdr);
   SFSampleSz = sizeof(SFSample);
   SFLAddressSz = sizeof(SFLAddress);
   SFrenormEntrySz = sizeof(struct xflow_status_entry_sampling);
@@ -1369,12 +1454,12 @@ void compute_once()
   IpFlowCmnSz = sizeof(struct ip_flow_common);
   
   HostAddrSz = sizeof(struct host_addr);
-  UDPHdrSz = sizeof(struct my_udphdr);
+  UDPHdrSz = sizeof(struct pm_udphdr);
 
 #if defined ENABLE_IPV6
   IP6HdrSz = sizeof(struct ip6_hdr);
   IP6AddrSz = sizeof(struct in6_addr);
-  IP6TlSz = sizeof(struct ip6_hdr)+sizeof(struct my_tlhdr);
+  IP6TlSz = sizeof(struct ip6_hdr)+sizeof(struct pm_tlhdr);
 #endif
 }
 
@@ -1423,14 +1508,14 @@ void finalizeSample(SFSample *sample, struct packet_ptrs_vector *pptrsv, struct 
 
         memcpy(pptrs->mac_ptr+ETH_ADDR_LEN, &sample->eth_src, ETH_ADDR_LEN); 
         memcpy(pptrs->mac_ptr, &sample->eth_dst, ETH_ADDR_LEN);
-	((struct my_iphdr *)pptrs->iph_ptr)->ip_vhl = 0x45;
-        memcpy(&((struct my_iphdr *)pptrs->iph_ptr)->ip_src, &sample->dcd_srcIP, 4);
-        memcpy(&((struct my_iphdr *)pptrs->iph_ptr)->ip_dst, &sample->dcd_dstIP, 4);
-        memcpy(&((struct my_iphdr *)pptrs->iph_ptr)->ip_p, &dcd_ipProtocol, 1);
-        memcpy(&((struct my_iphdr *)pptrs->iph_ptr)->ip_tos, &dcd_ipTos, 1);
-        memcpy(&((struct my_tlhdr *)pptrs->tlh_ptr)->src_port, &dcd_sport, 2);
-        memcpy(&((struct my_tlhdr *)pptrs->tlh_ptr)->dst_port, &dcd_dport, 2);
-        memcpy(&((struct my_tcphdr *)pptrs->tlh_ptr)->th_flags, &dcd_tcpFlags, 1);
+	((struct pm_iphdr *)pptrs->iph_ptr)->ip_vhl = 0x45;
+        memcpy(&((struct pm_iphdr *)pptrs->iph_ptr)->ip_src, &sample->dcd_srcIP, 4);
+        memcpy(&((struct pm_iphdr *)pptrs->iph_ptr)->ip_dst, &sample->dcd_dstIP, 4);
+        memcpy(&((struct pm_iphdr *)pptrs->iph_ptr)->ip_p, &dcd_ipProtocol, 1);
+        memcpy(&((struct pm_iphdr *)pptrs->iph_ptr)->ip_tos, &dcd_ipTos, 1);
+        memcpy(&((struct pm_tlhdr *)pptrs->tlh_ptr)->src_port, &dcd_sport, 2);
+        memcpy(&((struct pm_tlhdr *)pptrs->tlh_ptr)->dst_port, &dcd_dport, 2);
+        memcpy(&((struct pm_tcphdr *)pptrs->tlh_ptr)->th_flags, &dcd_tcpFlags, 1);
       }
 
       pptrs->lm_mask_src = sample->srcMask;
@@ -1465,9 +1550,9 @@ void finalizeSample(SFSample *sample, struct packet_ptrs_vector *pptrsv, struct 
         memcpy(&((struct ip6_hdr *)pptrsv->v6.iph_ptr)->ip6_dst, &sample->ipdst.address.ip_v6, IP6AddrSz);
         memcpy(&((struct ip6_hdr *)pptrsv->v6.iph_ptr)->ip6_nxt, &dcd_ipProtocol, 1);
         /* XXX: class ID ? */
-        memcpy(&((struct my_tlhdr *)pptrsv->v6.tlh_ptr)->src_port, &dcd_sport, 2);
-        memcpy(&((struct my_tlhdr *)pptrsv->v6.tlh_ptr)->dst_port, &dcd_dport, 2);
-        memcpy(&((struct my_tcphdr *)pptrsv->v6.tlh_ptr)->th_flags, &dcd_tcpFlags, 1);
+        memcpy(&((struct pm_tlhdr *)pptrsv->v6.tlh_ptr)->src_port, &dcd_sport, 2);
+        memcpy(&((struct pm_tlhdr *)pptrsv->v6.tlh_ptr)->dst_port, &dcd_dport, 2);
+        memcpy(&((struct pm_tcphdr *)pptrsv->v6.tlh_ptr)->th_flags, &dcd_tcpFlags, 1);
       }
 
       pptrsv->v6.lm_mask_src = sample->srcMask;
@@ -1498,14 +1583,14 @@ void finalizeSample(SFSample *sample, struct packet_ptrs_vector *pptrsv, struct 
         memcpy(pptrsv->vlan4.mac_ptr+ETH_ADDR_LEN, &sample->eth_src, ETH_ADDR_LEN); 
         memcpy(pptrsv->vlan4.mac_ptr, &sample->eth_dst, ETH_ADDR_LEN); 
         memcpy(pptrsv->vlan4.vlan_ptr, &vlan, 2); 
-	((struct my_iphdr *)pptrsv->vlan4.iph_ptr)->ip_vhl = 0x45;
-        memcpy(&((struct my_iphdr *)pptrsv->vlan4.iph_ptr)->ip_src, &sample->dcd_srcIP, 4);
-        memcpy(&((struct my_iphdr *)pptrsv->vlan4.iph_ptr)->ip_dst, &sample->dcd_dstIP, 4);
-        memcpy(&((struct my_iphdr *)pptrsv->vlan4.iph_ptr)->ip_p, &dcd_ipProtocol, 1);
-        memcpy(&((struct my_iphdr *)pptrsv->vlan4.iph_ptr)->ip_tos, &dcd_ipTos, 1); 
-        memcpy(&((struct my_tlhdr *)pptrsv->vlan4.tlh_ptr)->src_port, &dcd_sport, 2);
-        memcpy(&((struct my_tlhdr *)pptrsv->vlan4.tlh_ptr)->dst_port, &dcd_dport, 2);
-        memcpy(&((struct my_tcphdr *)pptrsv->vlan4.tlh_ptr)->th_flags, &dcd_tcpFlags, 1);
+	((struct pm_iphdr *)pptrsv->vlan4.iph_ptr)->ip_vhl = 0x45;
+        memcpy(&((struct pm_iphdr *)pptrsv->vlan4.iph_ptr)->ip_src, &sample->dcd_srcIP, 4);
+        memcpy(&((struct pm_iphdr *)pptrsv->vlan4.iph_ptr)->ip_dst, &sample->dcd_dstIP, 4);
+        memcpy(&((struct pm_iphdr *)pptrsv->vlan4.iph_ptr)->ip_p, &dcd_ipProtocol, 1);
+        memcpy(&((struct pm_iphdr *)pptrsv->vlan4.iph_ptr)->ip_tos, &dcd_ipTos, 1); 
+        memcpy(&((struct pm_tlhdr *)pptrsv->vlan4.tlh_ptr)->src_port, &dcd_sport, 2);
+        memcpy(&((struct pm_tlhdr *)pptrsv->vlan4.tlh_ptr)->dst_port, &dcd_dport, 2);
+        memcpy(&((struct pm_tcphdr *)pptrsv->vlan4.tlh_ptr)->th_flags, &dcd_tcpFlags, 1);
       }
 
       pptrsv->vlan4.lm_mask_src = sample->srcMask;
@@ -1541,9 +1626,9 @@ void finalizeSample(SFSample *sample, struct packet_ptrs_vector *pptrsv, struct 
         memcpy(&((struct ip6_hdr *)pptrsv->vlan6.iph_ptr)->ip6_dst, &sample->ipdst.address.ip_v6, IP6AddrSz);
         memcpy(&((struct ip6_hdr *)pptrsv->vlan6.iph_ptr)->ip6_nxt, &dcd_ipProtocol, 1); 
         /* XXX: class ID ? */
-        memcpy(&((struct my_tlhdr *)pptrsv->vlan6.tlh_ptr)->src_port, &dcd_sport, 2);
-        memcpy(&((struct my_tlhdr *)pptrsv->vlan6.tlh_ptr)->dst_port, &dcd_dport, 2);
-        memcpy(&((struct my_tcphdr *)pptrsv->vlan6.tlh_ptr)->th_flags, &dcd_tcpFlags, 1);
+        memcpy(&((struct pm_tlhdr *)pptrsv->vlan6.tlh_ptr)->src_port, &dcd_sport, 2);
+        memcpy(&((struct pm_tlhdr *)pptrsv->vlan6.tlh_ptr)->dst_port, &dcd_dport, 2);
+        memcpy(&((struct pm_tcphdr *)pptrsv->vlan6.tlh_ptr)->th_flags, &dcd_tcpFlags, 1);
       }
 
       pptrsv->vlan6.lm_mask_src = sample->srcMask;
@@ -1587,14 +1672,14 @@ void finalizeSample(SFSample *sample, struct packet_ptrs_vector *pptrsv, struct 
         pptrsv->mpls4.tlh_ptr = ptr + IP4HdrSz;
         reset_ip4(&pptrsv->mpls4);
 	
-	((struct my_iphdr *)pptrsv->mpls4.iph_ptr)->ip_vhl = 0x45;
-        memcpy(&((struct my_iphdr *)pptrsv->mpls4.iph_ptr)->ip_src, &sample->dcd_srcIP, 4);
-        memcpy(&((struct my_iphdr *)pptrsv->mpls4.iph_ptr)->ip_dst, &sample->dcd_dstIP, 4); 
-        memcpy(&((struct my_iphdr *)pptrsv->mpls4.iph_ptr)->ip_p, &dcd_ipProtocol, 1); 
-        memcpy(&((struct my_iphdr *)pptrsv->mpls4.iph_ptr)->ip_tos, &dcd_ipTos, 1); 
-        memcpy(&((struct my_tlhdr *)pptrsv->mpls4.tlh_ptr)->src_port, &dcd_sport, 2);
-        memcpy(&((struct my_tlhdr *)pptrsv->mpls4.tlh_ptr)->dst_port, &dcd_dport, 2);
-        memcpy(&((struct my_tcphdr *)pptrsv->mpls4.tlh_ptr)->th_flags, &dcd_tcpFlags, 1);
+	((struct pm_iphdr *)pptrsv->mpls4.iph_ptr)->ip_vhl = 0x45;
+        memcpy(&((struct pm_iphdr *)pptrsv->mpls4.iph_ptr)->ip_src, &sample->dcd_srcIP, 4);
+        memcpy(&((struct pm_iphdr *)pptrsv->mpls4.iph_ptr)->ip_dst, &sample->dcd_dstIP, 4); 
+        memcpy(&((struct pm_iphdr *)pptrsv->mpls4.iph_ptr)->ip_p, &dcd_ipProtocol, 1); 
+        memcpy(&((struct pm_iphdr *)pptrsv->mpls4.iph_ptr)->ip_tos, &dcd_ipTos, 1); 
+        memcpy(&((struct pm_tlhdr *)pptrsv->mpls4.tlh_ptr)->src_port, &dcd_sport, 2);
+        memcpy(&((struct pm_tlhdr *)pptrsv->mpls4.tlh_ptr)->dst_port, &dcd_dport, 2);
+        memcpy(&((struct pm_tcphdr *)pptrsv->mpls4.tlh_ptr)->th_flags, &dcd_tcpFlags, 1);
       }
 
       pptrsv->mpls4.lm_mask_src = sample->srcMask;
@@ -1642,9 +1727,9 @@ void finalizeSample(SFSample *sample, struct packet_ptrs_vector *pptrsv, struct 
         memcpy(&((struct ip6_hdr *)pptrsv->mpls6.iph_ptr)->ip6_dst, &sample->ipdst.address.ip_v6, IP6AddrSz); 
         memcpy(&((struct ip6_hdr *)pptrsv->mpls6.iph_ptr)->ip6_nxt, &dcd_ipProtocol, 1); 
         /* XXX: class ID ? */
-        memcpy(&((struct my_tlhdr *)pptrsv->mpls6.tlh_ptr)->src_port, &dcd_sport, 2);
-        memcpy(&((struct my_tlhdr *)pptrsv->mpls6.tlh_ptr)->dst_port, &dcd_dport, 2);
-        memcpy(&((struct my_tcphdr *)pptrsv->mpls6.tlh_ptr)->th_flags, &dcd_tcpFlags, 1);
+        memcpy(&((struct pm_tlhdr *)pptrsv->mpls6.tlh_ptr)->src_port, &dcd_sport, 2);
+        memcpy(&((struct pm_tlhdr *)pptrsv->mpls6.tlh_ptr)->dst_port, &dcd_dport, 2);
+        memcpy(&((struct pm_tcphdr *)pptrsv->mpls6.tlh_ptr)->th_flags, &dcd_tcpFlags, 1);
       }
 
       pptrsv->mpls6.lm_mask_src = sample->srcMask;
@@ -1688,14 +1773,14 @@ void finalizeSample(SFSample *sample, struct packet_ptrs_vector *pptrsv, struct 
         pptrsv->vlanmpls4.tlh_ptr = ptr + IP4HdrSz;
         reset_ip4(&pptrsv->vlanmpls4);
 
-	((struct my_iphdr *)pptrsv->vlanmpls4.iph_ptr)->ip_vhl = 0x45;
-        memcpy(&((struct my_iphdr *)pptrsv->vlanmpls4.iph_ptr)->ip_src, &sample->dcd_srcIP, 4); 
-        memcpy(&((struct my_iphdr *)pptrsv->vlanmpls4.iph_ptr)->ip_dst, &sample->dcd_dstIP, 4);
-        memcpy(&((struct my_iphdr *)pptrsv->vlanmpls4.iph_ptr)->ip_p, &dcd_ipProtocol, 1);
-        memcpy(&((struct my_iphdr *)pptrsv->vlanmpls4.iph_ptr)->ip_tos, &dcd_ipTos, 1);
-        memcpy(&((struct my_tlhdr *)pptrsv->vlanmpls4.tlh_ptr)->src_port, &dcd_sport, 2);
-        memcpy(&((struct my_tlhdr *)pptrsv->vlanmpls4.tlh_ptr)->dst_port, &dcd_dport, 2);
-        memcpy(&((struct my_tcphdr *)pptrsv->vlanmpls4.tlh_ptr)->th_flags, &dcd_tcpFlags, 1);
+	((struct pm_iphdr *)pptrsv->vlanmpls4.iph_ptr)->ip_vhl = 0x45;
+        memcpy(&((struct pm_iphdr *)pptrsv->vlanmpls4.iph_ptr)->ip_src, &sample->dcd_srcIP, 4); 
+        memcpy(&((struct pm_iphdr *)pptrsv->vlanmpls4.iph_ptr)->ip_dst, &sample->dcd_dstIP, 4);
+        memcpy(&((struct pm_iphdr *)pptrsv->vlanmpls4.iph_ptr)->ip_p, &dcd_ipProtocol, 1);
+        memcpy(&((struct pm_iphdr *)pptrsv->vlanmpls4.iph_ptr)->ip_tos, &dcd_ipTos, 1);
+        memcpy(&((struct pm_tlhdr *)pptrsv->vlanmpls4.tlh_ptr)->src_port, &dcd_sport, 2);
+        memcpy(&((struct pm_tlhdr *)pptrsv->vlanmpls4.tlh_ptr)->dst_port, &dcd_dport, 2);
+        memcpy(&((struct pm_tcphdr *)pptrsv->vlanmpls4.tlh_ptr)->th_flags, &dcd_tcpFlags, 1);
       }
 
       pptrsv->vlanmpls4.lm_mask_src = sample->srcMask;
@@ -1744,9 +1829,9 @@ void finalizeSample(SFSample *sample, struct packet_ptrs_vector *pptrsv, struct 
         memcpy(&((struct ip6_hdr *)pptrsv->vlanmpls6.iph_ptr)->ip6_dst, &sample->ipdst.address.ip_v6, IP6AddrSz); 
         memcpy(&((struct ip6_hdr *)pptrsv->vlanmpls6.iph_ptr)->ip6_nxt, &dcd_ipProtocol, 1); 
         /* XXX: class ID ? */
-        memcpy(&((struct my_tlhdr *)pptrsv->vlanmpls6.tlh_ptr)->src_port, &dcd_sport, 2);
-        memcpy(&((struct my_tlhdr *)pptrsv->vlanmpls6.tlh_ptr)->dst_port, &dcd_dport, 2);
-        memcpy(&((struct my_tcphdr *)pptrsv->vlanmpls6.tlh_ptr)->th_flags, &dcd_tcpFlags, 1);
+        memcpy(&((struct pm_tlhdr *)pptrsv->vlanmpls6.tlh_ptr)->src_port, &dcd_sport, 2);
+        memcpy(&((struct pm_tlhdr *)pptrsv->vlanmpls6.tlh_ptr)->dst_port, &dcd_dport, 2);
+        memcpy(&((struct pm_tcphdr *)pptrsv->vlanmpls6.tlh_ptr)->th_flags, &dcd_tcpFlags, 1);
       }
 
       pptrsv->vlanmpls6.lm_mask_src = sample->srcMask;
@@ -1926,7 +2011,7 @@ void reset_mac_vlan(struct packet_ptrs *pptrs)
 void reset_ip4(struct packet_ptrs *pptrs)
 {
   memset(pptrs->iph_ptr, 0, IP4TlSz);
-  Assign8(((struct my_iphdr *)pptrs->iph_ptr)->ip_vhl, 5);
+  Assign8(((struct pm_iphdr *)pptrs->iph_ptr)->ip_vhl, 5);
 }
 
 #if defined ENABLE_IPV6
@@ -1937,15 +2022,6 @@ void reset_ip6(struct packet_ptrs *pptrs)
   Assign16(((struct ip6_hdr *)pptrs->iph_ptr)->ip6_hlim, htons(64));
 }
 #endif
-
-/* dummy functions; their use is limited to solve a trivial dependency */ 
-int ip_handler(register struct packet_ptrs *pptrs)
-{
-}
-
-int ip6_handler(register struct packet_ptrs *pptrs)
-{
-}
 
 char *sfv245_check_status(SFSample *spp, struct sockaddr *sa)
 {
@@ -2003,7 +2079,7 @@ void sfv245_check_counter_log_init(struct packet_ptrs *pptrs)
   }
 }
 
-int sf_cnt_log_msg(struct bgp_peer *peer, SFSample *sample, u_int32_t len, char *event_type, int output, u_int32_t tag)
+int sf_cnt_log_msg(struct bgp_peer *peer, SFSample *sample, int version, u_int32_t len, char *event_type, int output, u_int32_t tag)
 {
   struct bgp_misc_structs *bms = bgp_select_misc_db(FUNC_TYPE_SFLOW_COUNTER);
   int ret = 0, amqp_ret = 0, kafka_ret = 0, etype = BGP_LOGDUMP_ET_NONE;
@@ -2029,55 +2105,74 @@ int sf_cnt_log_msg(struct bgp_peer *peer, SFSample *sample, u_int32_t len, char 
   if (output == PRINT_OUTPUT_JSON) {
 #ifdef WITH_JANSSON
     char ip_address[INET6_ADDRSTRLEN];
-    json_t *obj = json_object(), *kv;
+    json_t *obj = json_object();
 
     /* no need for seq and timestamp for "dump" event_type */
     if (etype == BGP_LOGDUMP_ET_LOG) {
-      kv = json_pack("{sI}", "seq", (json_int_t)bms->log_seq);
-      json_object_update_missing(obj, kv);
-      json_decref(kv);
+      json_object_set_new_nocheck(obj, "seq", json_integer((json_int_t)bms->log_seq));
       bgp_peer_log_seq_increment(&bms->log_seq);
 
-      kv = json_pack("{ss}", "timestamp", bms->log_tstamp_str);
-      json_object_update_missing(obj, kv);
-      json_decref(kv);
+      json_object_set_new_nocheck(obj, "timestamp", json_string(bms->log_tstamp_str));
     }
 
     addr_to_str(ip_address, &peer->addr);
-    kv = json_pack("{ss}", "peer_ip_src", ip_address);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
+    json_object_set_new_nocheck(obj, "peer_ip_src", json_string(ip_address));
 
-    kv = json_pack("{ss}", "event_type", event_type);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
+    json_object_set_new_nocheck(obj, "event_type", json_string(event_type));
 
-    kv = json_pack("{sI}", "source_id_index", (json_int_t)sample->ds_index);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
+    json_object_set_new_nocheck(obj, "source_id_index", json_integer((json_int_t)sample->ds_index));
 
-    kv = json_pack("{sI}", "sflow_seq", (json_int_t)sample->sequenceNo);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
+    json_object_set_new_nocheck(obj, "sflow_seq", json_integer((json_int_t)sample->sequenceNo));
 
-    kv = json_pack("{sI}", "sflow_cnt_seq", (json_int_t)sample->cntSequenceNo);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
+    json_object_set_new_nocheck(obj, "sflow_cnt_seq", json_integer((json_int_t)sample->cntSequenceNo));
 
-    switch (tag) {
-    case SFLCOUNTERS_GENERIC:
-      readCounters_generic(peer, sample, "log", config.sfacctd_counter_output, obj);
-      break;
-    case SFLCOUNTERS_ETHERNET:
-      readCounters_ethernet(peer, sample, "log", config.sfacctd_counter_output, obj);
-      break;
-    case SFLCOUNTERS_VLAN:
-      readCounters_vlan(peer, sample, "log", config.sfacctd_counter_output, obj);
-      break;
-    default:
-      skipBytes(sample, len);
-      break;
+    if (version == 5) {
+      switch (tag) {
+      case SFLCOUNTERS_GENERIC:
+        readCounters_generic(peer, sample, "log", config.sfacctd_counter_output, obj);
+        break;
+      case SFLCOUNTERS_ETHERNET:
+        readCounters_ethernet(peer, sample, "log", config.sfacctd_counter_output, obj);
+        break;
+      case SFLCOUNTERS_VLAN:
+        readCounters_vlan(peer, sample, "log", config.sfacctd_counter_output, obj);
+        break;
+      default:
+        skipBytes(sample, len);
+        break;
+      }
     }
+    else if (version < 5) {
+      switch (tag) {
+      case INMCOUNTERSVERSION_GENERIC:
+      case INMCOUNTERSVERSION_ETHERNET:
+        readCounters_generic(peer, sample, "log", config.sfacctd_counter_output, obj);
+        break;
+      case INMCOUNTERSVERSION_VLAN:
+	/* nothing here */
+	break;
+      default:
+        skipBytes(sample, len);
+	break;
+      }
+
+      /* now see if there are any specific counter blocks to add */
+      switch (tag) {
+      case INMCOUNTERSVERSION_GENERIC:
+	/* nothing more */
+	break;
+      case INMCOUNTERSVERSION_ETHERNET:
+	readCounters_ethernet(peer, sample, "log", config.sfacctd_counter_output, obj);
+	break;
+      case INMCOUNTERSVERSION_VLAN:
+	readCounters_vlan(peer, sample, "log", config.sfacctd_counter_output, obj);
+	break;
+      default:
+	/* nothing more; already skipped */
+	break;
+      }
+    }
+    else skipBytes(sample, len);
 
     if (config.sfacctd_counter_file && etype == BGP_LOGDUMP_ET_LOG)
       write_and_free_json(peer->log->fd, obj);
@@ -2134,85 +2229,45 @@ int readCounters_generic(struct bgp_peer *peer, SFSample *sample, char *event_ty
 
   if (!peer || !sample || !vobj) return ret;
 
-  kv = json_pack("{ss}", "sf_cnt_type", msg_type);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
+  json_object_set_new_nocheck(obj, "sf_cnt_type", json_string(msg_type));
 
-  kv = json_pack("{sI}", "ifIndex", (json_int_t)sample->ifCounters.ifIndex);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
+  json_object_set_new_nocheck(obj, "ifIndex", json_integer((json_int_t)sample->ifCounters.ifIndex));
 
-  kv = json_pack("{sI}", "ifType", (json_int_t)sample->ifCounters.ifType);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
+  json_object_set_new_nocheck(obj, "ifType", json_integer((json_int_t)sample->ifCounters.ifType));
 
-  kv = json_pack("{sI}", "ifSpeed", (json_int_t)sample->ifCounters.ifSpeed);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
+  json_object_set_new_nocheck(obj, "ifSpeed", json_integer((json_int_t)sample->ifCounters.ifSpeed));
 
-  kv = json_pack("{sI}", "ifDirection", (json_int_t)sample->ifCounters.ifDirection);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
+  json_object_set_new_nocheck(obj, "ifDirection", json_integer((json_int_t)sample->ifCounters.ifDirection));
 
-  kv = json_pack("{sI}", "ifStatus", (json_int_t)sample->ifCounters.ifStatus);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
+  json_object_set_new_nocheck(obj, "ifStatus", json_integer((json_int_t)sample->ifCounters.ifStatus));
 
-  kv = json_pack("{sI}", "ifInOctets", (json_int_t)sample->ifCounters.ifInOctets);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
+  json_object_set_new_nocheck(obj, "ifInOctets", json_integer((json_int_t)sample->ifCounters.ifInOctets));
 
-  kv = json_pack("{sI}", "ifInUcastPkts", (json_int_t)sample->ifCounters.ifInUcastPkts);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
+  json_object_set_new_nocheck(obj, "ifInUcastPkts", json_integer((json_int_t)sample->ifCounters.ifInUcastPkts));
 
-  kv = json_pack("{sI}", "ifInMulticastPkts", (json_int_t)sample->ifCounters.ifInMulticastPkts);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
+  json_object_set_new_nocheck(obj, "ifInMulticastPkts", json_integer((json_int_t)sample->ifCounters.ifInMulticastPkts));
 
-  kv = json_pack("{sI}", "ifInBroadcastPkts", (json_int_t)sample->ifCounters.ifInBroadcastPkts);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
+  json_object_set_new_nocheck(obj, "ifInBroadcastPkts", json_integer((json_int_t)sample->ifCounters.ifInBroadcastPkts));
 
-  kv = json_pack("{sI}", "ifInDiscards", (json_int_t)sample->ifCounters.ifInDiscards);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
+  json_object_set_new_nocheck(obj, "ifInDiscards", json_integer((json_int_t)sample->ifCounters.ifInDiscards));
 
-  kv = json_pack("{sI}", "ifInErrors", (json_int_t)sample->ifCounters.ifInErrors);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
+  json_object_set_new_nocheck(obj, "ifInErrors", json_integer((json_int_t)sample->ifCounters.ifInErrors));
 
-  kv = json_pack("{sI}", "ifInUnknownProtos", (json_int_t)sample->ifCounters.ifInUnknownProtos);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
+  json_object_set_new_nocheck(obj, "ifInUnknownProtos", json_integer((json_int_t)sample->ifCounters.ifInUnknownProtos));
 
-  kv = json_pack("{sI}", "ifOutOctets", (json_int_t)sample->ifCounters.ifOutOctets);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
+  json_object_set_new_nocheck(obj, "ifOutOctets", json_integer((json_int_t)sample->ifCounters.ifOutOctets));
 
-  kv = json_pack("{sI}", "ifOutUcastPkts", (json_int_t)sample->ifCounters.ifOutUcastPkts);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
+  json_object_set_new_nocheck(obj, "ifOutUcastPkts", json_integer((json_int_t)sample->ifCounters.ifOutUcastPkts));
 
-  kv = json_pack("{sI}", "ifOutMulticastPkts", (json_int_t)sample->ifCounters.ifOutMulticastPkts);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
+  json_object_set_new_nocheck(obj, "ifOutMulticastPkts", json_integer((json_int_t)sample->ifCounters.ifOutMulticastPkts));
 
-  kv = json_pack("{sI}", "ifOutBroadcastPkts", (json_int_t)sample->ifCounters.ifOutBroadcastPkts);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
+  json_object_set_new_nocheck(obj, "ifOutBroadcastPkts", json_integer((json_int_t)sample->ifCounters.ifOutBroadcastPkts));
 
-  kv = json_pack("{sI}", "ifOutDiscards", (json_int_t)sample->ifCounters.ifOutDiscards);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
+  json_object_set_new_nocheck(obj, "ifOutDiscards", json_integer((json_int_t)sample->ifCounters.ifOutDiscards));
 
-  kv = json_pack("{sI}", "ifOutErrors", (json_int_t)sample->ifCounters.ifOutErrors);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
+  json_object_set_new_nocheck(obj, "ifOutErrors", json_integer((json_int_t)sample->ifCounters.ifOutErrors));
 
-  kv = json_pack("{sI}", "ifPromiscuousMode", (json_int_t)sample->ifCounters.ifPromiscuousMode);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
+  json_object_set_new_nocheck(obj, "ifPromiscuousMode", json_integer((json_int_t)sample->ifCounters.ifPromiscuousMode));
 #endif
 
   return ret;
@@ -2247,61 +2302,33 @@ int readCounters_ethernet(struct bgp_peer *peer, SFSample *sample, char *event_t
 
   if (!peer || !sample || !vobj) return ret;
 
-  kv = json_pack("{ss}", "sf_cnt_type", msg_type);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
+  json_object_set_new_nocheck(obj, "sf_cnt_type", json_string(msg_type));
 
-  kv = json_pack("{sI}", "dot3StatsAlignmentErrors", (json_int_t)m32_1);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
+  json_object_set_new_nocheck(obj, "dot3StatsAlignmentErrors", json_integer((json_int_t)m32_1));
 
-  kv = json_pack("{sI}", "dot3StatsFCSErrors", (json_int_t)m32_2);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
+  json_object_set_new_nocheck(obj, "dot3StatsFCSErrors", json_integer((json_int_t)m32_2));
 
-  kv = json_pack("{sI}", "dot3StatsSingleCollisionFrames", (json_int_t)m32_3);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
+  json_object_set_new_nocheck(obj, "dot3StatsSingleCollisionFrames", json_integer((json_int_t)m32_3));
 
-  kv = json_pack("{sI}", "dot3StatsMultipleCollisionFrames", (json_int_t)m32_4);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
+  json_object_set_new_nocheck(obj, "dot3StatsMultipleCollisionFrames", json_integer((json_int_t)m32_4));
 
-  kv = json_pack("{sI}", "dot3StatsSQETestErrors", (json_int_t)m32_5);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
+  json_object_set_new_nocheck(obj, "dot3StatsSQETestErrors", json_integer((json_int_t)m32_5));
 
-  kv = json_pack("{sI}", "dot3StatsDeferredTransmissions", (json_int_t)m32_6);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
+  json_object_set_new_nocheck(obj, "dot3StatsDeferredTransmissions", json_integer((json_int_t)m32_6));
 
-  kv = json_pack("{sI}", "dot3StatsLateCollisions", (json_int_t)m32_7);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
+  json_object_set_new_nocheck(obj, "dot3StatsLateCollisions", json_integer((json_int_t)m32_7));
 
-  kv = json_pack("{sI}", "dot3StatsExcessiveCollisions", (json_int_t)m32_8);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
+  json_object_set_new_nocheck(obj, "dot3StatsExcessiveCollisions", json_integer((json_int_t)m32_8));
 
-  kv = json_pack("{sI}", "dot3StatsInternalMacTransmitErrors", (json_int_t)m32_9);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
+  json_object_set_new_nocheck(obj, "dot3StatsInternalMacTransmitErrors", json_integer((json_int_t)m32_9));
 
-  kv = json_pack("{sI}", "dot3StatsCarrierSenseErrors", (json_int_t)m32_10);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
+  json_object_set_new_nocheck(obj, "dot3StatsCarrierSenseErrors", json_integer((json_int_t)m32_10));
 
-  kv = json_pack("{sI}", "dot3StatsFrameTooLongs", (json_int_t)m32_11);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
+  json_object_set_new_nocheck(obj, "dot3StatsFrameTooLongs", json_integer((json_int_t)m32_11));
 
-  kv = json_pack("{sI}", "dot3StatsInternalMacReceiveErrors", (json_int_t)m32_12);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
+  json_object_set_new_nocheck(obj, "dot3StatsInternalMacReceiveErrors", json_integer((json_int_t)m32_12));
 
-  kv = json_pack("{sI}", "dot3StatsSymbolErrors", (json_int_t)m32_13);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
+  json_object_set_new_nocheck(obj, "dot3StatsSymbolErrors", json_integer((json_int_t)m32_13));
 #endif
 
   return ret;
@@ -2313,7 +2340,7 @@ int readCounters_vlan(struct bgp_peer *peer, SFSample *sample, char *event_type,
   int ret = 0;
 #ifdef WITH_JANSSON
   char ip_address[INET6_ADDRSTRLEN];
-  json_t *obj = (json_t *) vobj, *kv;
+  json_t *obj = (json_t *) vobj;
 
   u_int64_t m64_1;
   u_int32_t m32_1, m32_2, m32_3, m32_4;
@@ -2328,33 +2355,19 @@ int readCounters_vlan(struct bgp_peer *peer, SFSample *sample, char *event_type,
 
   if (!peer || !sample || !vobj) return ret;
 
-  kv = json_pack("{ss}", "sf_cnt_type", msg_type);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
+  json_object_set_new_nocheck(obj, "sf_cnt_type", json_string(msg_type));
 
-  kv = json_pack("{sI}", "octets", (json_int_t)m64_1);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
+  json_object_set_new_nocheck(obj, "octets", json_integer((json_int_t)m64_1));
 
-  kv = json_pack("{sI}", "ucastPkts", (json_int_t)m32_1);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
+  json_object_set_new_nocheck(obj, "ucastPkts", json_integer((json_int_t)m32_1));
 
-  kv = json_pack("{sI}", "multicastPkts", (json_int_t)m32_2);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
+  json_object_set_new_nocheck(obj, "multicastPkts", json_integer((json_int_t)m32_2));
 
-  kv = json_pack("{sI}", "broadcastPkts", (json_int_t)m32_3);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
+  json_object_set_new_nocheck(obj, "broadcastPkts", json_integer((json_int_t)m32_3));
 
-  kv = json_pack("{sI}", "discards", (json_int_t)m32_4);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
+  json_object_set_new_nocheck(obj, "discards", json_integer((json_int_t)m32_4));
 
-  kv = json_pack("{sI}", "vlan", (json_int_t)sample->in_vlan);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
+  json_object_set_new_nocheck(obj, "vlan", json_integer((json_int_t)sample->in_vlan));
 #endif
 
   return ret;
@@ -2396,7 +2409,7 @@ int sfacctd_counter_init_kafka_host()
 {
   int ret;
 
-  p_kafka_init_host(&sfacctd_counter_kafka_host);
+  p_kafka_init_host(&sfacctd_counter_kafka_host, config.sfacctd_counter_kafka_config_file);
   ret = p_kafka_connect_to_produce(&sfacctd_counter_kafka_host);
 
   if (!config.sfacctd_counter_kafka_broker_host) config.sfacctd_counter_kafka_broker_host = default_kafka_broker_host;

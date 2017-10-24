@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2017 by Paolo Lucente
 */
 
 /*
@@ -68,6 +68,7 @@ Inline void RetireElem(struct db_cache *Cursor)
   if (Cursor->pbgp) free(Cursor->pbgp);
   if (Cursor->pnat) free(Cursor->pnat);
   if (Cursor->pmpls) free(Cursor->pmpls);
+  if (Cursor->ptun) free(Cursor->ptun);
   if (Cursor->pcust) free(Cursor->pcust);
   if (Cursor->pvlen) free(Cursor->pvlen);
   if (Cursor->stitch) free(Cursor->stitch);
@@ -309,12 +310,10 @@ Inline void SQL_SetENV_child(const struct insert_data *idata)
 
   if (idata->dyn_table) {
     u_char *tmpptr;
-    struct tm *nowtm;
 
-    nowtm = localtime(&idata->basetime);
     strncat(envbuf.ptr, "EFFECTIVE_SQL_TABLE=", envbuf.end-envbuf.ptr);
     tmpptr = envbuf.ptr + strlen(envbuf.ptr);
-    strftime(tmpptr, envbuf.end-tmpptr, config.sql_table, nowtm); 
+    pm_strftime(tmpptr, envbuf.end-tmpptr, config.sql_table, &idata->basetime, config.timestamps_utc);
     ptrs[count] = envbuf.ptr;
     envbuf.ptr += strlen(envbuf.ptr)+1;
     count++;

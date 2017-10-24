@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2017 by Paolo Lucente
 */
 
 /*
@@ -143,7 +143,7 @@ struct token_header {
 #define IPPROTO_MOBILITY        135
 #endif
 
-struct my_iphdr
+struct pm_iphdr
 {
    u_int8_t     ip_vhl;         /* header length, version */
 #define IP_V(ip)        (((ip)->ip_vhl & 0xf0) >> 4)
@@ -163,7 +163,7 @@ struct my_iphdr
 };
 
 typedef u_int32_t tcp_seq;
-struct my_tcphdr
+struct pm_tcphdr
 {
     u_int16_t th_sport;         /* source port */
     u_int16_t th_dport;         /* destination port */
@@ -198,7 +198,7 @@ struct my_tcphdr
 #define TCP_MD5SIG       14
 #endif
 
-struct my_tcp_md5sig
+struct pm_tcp_md5sig
 {
   struct sockaddr_storage tcpm_addr;            /* Address associated.  */
   u_int16_t     __tcpm_pad1;                    /* Zero.  */
@@ -207,7 +207,7 @@ struct my_tcp_md5sig
   u_int8_t      tcpm_key[TCP_MD5SIG_MAXKEYLEN]; /* Key (binary).  */
 };
 
-struct my_udphdr
+struct pm_udphdr
 {
   u_int16_t uh_sport;           /* source port */
   u_int16_t uh_dport;           /* destination port */
@@ -215,28 +215,7 @@ struct my_udphdr
   u_int16_t uh_sum;             /* udp checksum */
 };
 
-struct my_icmphdr
-{
-  u_int8_t type;                /* message type */
-  u_int8_t code;                /* type sub-code */
-  u_int16_t checksum;
-  union
-  {
-    struct
-    {
-      u_int16_t id;
-      u_int16_t sequence;
-    } echo;                     /* echo datagram */
-    u_int32_t   gateway;        /* gateway address */
-    struct
-    {
-      u_int16_t _unused;
-      u_int16_t mtu;
-    } frag;                     /* path mtu discovery */
-  } un;
-};
-
-struct my_tlhdr {
+struct pm_tlhdr {
    u_int16_t	src_port;	/* source and destination ports */
    u_int16_t	dst_port;
    
@@ -246,13 +225,13 @@ struct my_tlhdr {
 
 #define MAX_GTP_TRIALS	8
 
-struct my_gtphdr_v0 {
+struct pm_gtphdr_v0 {
     u_int8_t flags;
     u_int8_t message;
     u_int16_t length;
 };
 
-struct my_gtphdr_v1 {
+struct pm_gtphdr_v1 {
     u_int8_t flags;
     u_int8_t message;
     u_int16_t length;
@@ -262,6 +241,8 @@ struct my_gtphdr_v1 {
 /* typedefs */
 typedef u_int32_t as_t;
 typedef u_int16_t as16_t;
+typedef u_int16_t afi_t;
+typedef u_int8_t safi_t;
 
 #define RD_LEN		8
 #define RD_TYPE_AS      0
@@ -274,21 +255,21 @@ struct rd_as
   u_int16_t type;
   u_int16_t as;
   u_int32_t val;
-};
+} __attribute__ ((packed));
 
 struct rd_ip
 {
   u_int16_t type;
   struct in_addr ip;
   u_int16_t val;
-};
+} __attribute__ ((packed));
 
 struct rd_as4
 {
   u_int16_t type;
   as_t as;
   u_int32_t val;
-};
+} __attribute__ ((packed));
 
 /* Picking one of the three structures as rd_t for simplicity */
 typedef struct rd_as rd_t;
@@ -357,6 +338,9 @@ struct packet_ptrs {
   u_int16_t pf; /* pending fragments or packets */
   u_int8_t new_flow; /* pmacctd flows: part of a new flow ? */
   u_int8_t tcp_flags; /* pmacctd flows: TCP packet flags; URG, PUSH filtered out */ 
+  u_int8_t frag_first_found; /* entry found in fragments table */
+  u_int16_t frag_sum_bytes; /* accumulated bytes by fragment entry, ie. due to out of order */
+  u_int16_t frag_sum_pkts; /* accumulated packets by fragment entry, ie. due to out of order */
   u_char *vlan_ptr; /* ptr to vlan id */
   u_char *mpls_ptr; /* ptr to base MPLS label */
   u_char *iph_ptr; /* ptr to ip header */
@@ -380,6 +364,9 @@ struct packet_ptrs {
 #if defined (WITH_GEOIPV2)
   MMDB_lookup_result_s geoipv2_src;
   MMDB_lookup_result_s geoipv2_dst;
+#endif
+#if defined (WITH_NDPI)
+  pm_class2_t ndpi_class;
 #endif
 };
 
@@ -437,6 +424,11 @@ struct pkt_primitives {
 #if defined (WITH_GEOIP) || defined (WITH_GEOIPV2)
   pm_country_t src_ip_country;
   pm_country_t dst_ip_country;
+  pm_pocode_t src_ip_pocode;
+  pm_pocode_t dst_ip_pocode;
+#endif
+#if defined (WITH_NDPI)
+  pm_class2_t ndpi_class;
 #endif
   pm_id_t tag;
   pm_id_t tag2;
@@ -466,6 +458,9 @@ struct pkt_payload {
   pm_counter_t pkt_num;
   u_int32_t time_start;
   pm_class_t class;
+#if defined (WITH_NDPI)
+  pm_class2_t ndpi_class;
+#endif
   pm_id_t tag;
   pm_id_t tag2;
   struct host_addr src_ip;
@@ -521,6 +516,7 @@ struct extra_primitives {
   u_int16_t off_pkt_lbgp_primitives;
   u_int16_t off_pkt_nat_primitives;
   u_int16_t off_pkt_mpls_primitives;
+  u_int16_t off_pkt_tun_primitives;
   u_int16_t off_custom_primitives;
   u_int16_t off_pkt_extras; /* nfprobe only */
   u_int16_t off_pkt_vlen_hdr_primitives;
@@ -532,6 +528,7 @@ struct primitives_ptrs {
   struct pkt_legacy_bgp_primitives *plbgp;
   struct pkt_nat_primitives *pnat;
   struct pkt_mpls_primitives *pmpls;
+  struct pkt_tunnel_primitives *ptun;
   char *pcust;
   struct pkt_extras *pextras;
   struct pkt_vlen_hdr_primitives *pvlen;
@@ -581,6 +578,13 @@ struct pkt_mpls_primitives {
   u_int8_t mpls_stack_depth;
 };
 
+struct pkt_tunnel_primitives {
+  struct host_addr tunnel_src_ip;
+  struct host_addr tunnel_dst_ip;
+  u_int8_t tunnel_tos;
+  u_int8_t tunnel_proto;
+};
+
 /* same as pkt_legacy_bgp_primitives but pointers in place of strings */
 struct cache_legacy_bgp_primitives {
   char *std_comms;
@@ -607,9 +611,15 @@ struct packet_ptrs_vector {
 #endif
 };
 
+struct hosts_table_entry {
+  struct host_addr addr;
+  struct host_mask mask;
+};
+
 struct hosts_table {
-  short int num;
-  struct host_addr table[MAX_MAP_ENTRIES];
+  int num;
+  time_t timestamp;
+  struct hosts_table_entry table[MAX_MAP_ENTRIES];
 };
 
 struct bgp_md5_table_entry {
@@ -618,7 +628,7 @@ struct bgp_md5_table_entry {
 };
 
 struct bgp_md5_table {
-  short int num;
+  int num;
   struct bgp_md5_table_entry table[BGP_MD5_MAP_ENTRIES];
 };
 

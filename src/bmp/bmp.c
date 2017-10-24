@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2017 by Paolo Lucente
 */
 
 /*
@@ -87,6 +87,7 @@ void skinny_bmp_daemon()
 
 
   /* initial cleanups */
+  reload_map_bmp_thread = FALSE;
   reload_log_bmp_thread = FALSE;
   memset(&server, 0, sizeof(server));
   memset(&client, 0, sizeof(client));
@@ -380,6 +381,12 @@ void skinny_bmp_daemon()
     select_num = select(select_fd, &read_descs, NULL, NULL, drt_ptr);
     if (select_num < 0) goto select_again;
 
+    if (reload_map_bmp_thread) {
+      if (config.nfacctd_bmp_allow_file) load_allow_file(config.nfacctd_bmp_allow_file, &allow);
+
+      reload_map_bmp_thread = FALSE;
+    }
+
     if (reload_log_bmp_thread) {
       for (peers_idx = 0; peers_idx < config.nfacctd_bmp_max_peers; peers_idx++) {
         if (bmp_misc_db->peers_log[peers_idx].fd) {
@@ -395,13 +402,15 @@ void skinny_bmp_daemon()
 
     if (bmp_misc_db->msglog_backend_methods || bmp_misc_db->dump_backend_methods) {
       gettimeofday(&bmp_misc_db->log_tstamp, NULL);
-      compose_timestamp(bmp_misc_db->log_tstamp_str, SRVBUFLEN, &bmp_misc_db->log_tstamp, TRUE, config.timestamps_since_epoch);
+      compose_timestamp(bmp_misc_db->log_tstamp_str, SRVBUFLEN, &bmp_misc_db->log_tstamp, TRUE,
+			config.timestamps_since_epoch, config.timestamps_rfc3339, config.timestamps_utc);
 
       if (bmp_misc_db->dump_backend_methods) {
         while (bmp_misc_db->log_tstamp.tv_sec > dump_refresh_deadline) {
           bmp_misc_db->dump.tstamp.tv_sec = dump_refresh_deadline;
           bmp_misc_db->dump.tstamp.tv_usec = 0;
-          compose_timestamp(bmp_misc_db->dump.tstamp_str, SRVBUFLEN, &bmp_misc_db->dump.tstamp, FALSE, config.timestamps_since_epoch);
+          compose_timestamp(bmp_misc_db->dump.tstamp_str, SRVBUFLEN, &bmp_misc_db->dump.tstamp, FALSE,
+			    config.timestamps_since_epoch, config.timestamps_rfc3339, config.timestamps_utc);
 	  bmp_misc_db->dump.period = config.bmp_dump_refresh_time;
 
           bmp_handle_dump_event();
@@ -531,15 +540,13 @@ void skinny_bmp_daemon()
       if (bmp_misc_db->dump_backend_methods)
 	bmp_dump_init_peer(peer);
 
-      /* Check: only one TCP connection is allowed per peer */
+      /* Check: multiple TCP connections per peer */
       for (peers_check_idx = 0, peers_num = 0; peers_check_idx < config.nfacctd_bmp_max_peers; peers_check_idx++) {
         if (peers_idx != peers_check_idx && !memcmp(&bmp_peers[peers_check_idx].self.addr, &peer->addr, sizeof(bmp_peers[peers_check_idx].self.addr))) {
-          Log(LOG_ERR, "ERROR ( %s/%s ): [%s] Refusing new connection from existing peer.\n",
+	  if (bmp_misc_db->is_thread && !config.nfacctd_bgp_to_agent_map) {
+            Log(LOG_WARNING, "WARN ( %s/%s ): [%s] Multiple connections from peer and no bgp_agent_map defined.\n",
                                 config.name, bmp_misc_db->log_str, bmp_peers[peers_check_idx].self.addr_str);
-          FD_CLR(peer->fd, &bkp_read_descs);
-          bmp_peer_close(bmpp, FUNC_TYPE_BMP);
-	  recalc_fds = TRUE;
-          goto read_data;
+	  }
         }
         else {
           if (bmp_peers[peers_check_idx].self.fd) peers_num++;

@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2017 by Paolo Lucente
 */
 
 /*
@@ -65,8 +65,14 @@
 #include <signal.h>
 #include <syslog.h>
 #include <sys/resource.h>
+<<<<<<< HEAD
 #include <search.h>
 #include <sys/poll.h>
+=======
+#include <dirent.h>
+#include <limits.h>
+#include "pmsearch.h"
+>>>>>>> 00cd756a55f954e1bcf34b2ad6e04df2e182ab2e
 
 #include <sys/mman.h>
 #if !defined (MAP_ANONYMOUS)
@@ -86,6 +92,14 @@
 #endif
 #if defined (WITH_GEOIPV2)
 #include <maxminddb.h>
+#endif
+
+#if defined (WITH_NDPI)
+#include <ndpi_main.h>
+#endif
+
+#if defined (WITH_ZMQ)
+#include <zmq.h>
 #endif
 
 #include "pmacct-build.h"
@@ -210,6 +224,14 @@ typedef struct {
   u_int16_t off;
 } pm_hash_serial_t;
 
+#if (defined WITH_JANSSON)
+#include <jansson.h>
+#endif
+
+#if (defined WITH_AVRO)
+#include <avro.h>
+#endif
+
 #include "pmacct-defines.h"
 #include "network.h"
 #include "pretag.h"
@@ -242,6 +264,7 @@ struct pcap_device {
   pcap_t *dev_desc;
   int link_type;
   int active;
+  int errors; /* error count when reading from a savefile */
   struct _devices_struct *data; 
 };
 
@@ -275,7 +298,7 @@ struct _primitives_matrix_struct {
   u_int8_t sfacctd;
   u_int8_t pmtelemetryd;
   u_int8_t pmbgpd;
-  u_int8_t pmbgmd;
+  u_int8_t pmbmpd;
   char desc[PRIMITIVE_DESC_LEN];
 };
 
@@ -346,6 +369,7 @@ EXT void pcap_cb(u_char *, const struct pcap_pkthdr *, const u_char *);
 EXT int PM_find_id(struct id_table *, struct packet_ptrs *, pm_id_t *, pm_id_t *);
 EXT void compute_once();
 EXT void set_index_pkt_ptrs(struct packet_ptrs *);
+EXT ssize_t recvfrom_savefile(struct pcap_device *, void **, struct sockaddr *, struct timeval **);
 #undef EXT
 
 #ifndef HAVE_STRLCPY
@@ -353,7 +377,6 @@ size_t strlcpy(char *, const char *, size_t);
 #endif
 
 #if (defined WITH_JANSSON)
-#include <jansson.h>
 #if (!defined HAVE_JSON_OBJECT_UPDATE_MISSING)
 int json_object_update_missing(json_t *, json_t *);
 #endif
@@ -378,8 +401,10 @@ initsetproctitle(int, char**, char**);
 #endif
 EXT struct host_addr mcast_groups[MAX_MCAST_GROUPS];
 EXT int reload_map, reload_map_exec_plugins, reload_geoipv2_file;
-EXT int reload_map_bgp_thread, reload_log_bgp_thread, reload_log_bmp_thread;
-EXT int reload_log_sf_cnt, reload_log_telemetry_thread;
+EXT int reload_map_bgp_thread, reload_log_bgp_thread;
+EXT int reload_map_bmp_thread, reload_log_bmp_thread;
+EXT int reload_map_telemetry_thread, reload_log_telemetry_thread;
+EXT int reload_log_sf_cnt;
 EXT int data_plugins, tee_plugins;
 EXT struct timeval reload_map_tstamp;
 EXT struct child_ctl2 dump_writers;

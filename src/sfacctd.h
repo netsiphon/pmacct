@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2017 by Paolo Lucente
 */
 
 /*
@@ -55,6 +55,7 @@ enum INMCounters_version {
 };
 
 typedef struct _SFSample {
+  struct timeval *ts;
   struct in_addr sourceIP;
   SFLAddress agent_addr;
   u_int32_t agentSubId;
@@ -108,6 +109,14 @@ typedef struct _SFSample {
   u_int32_t dcd_tcpFlags;
   u_int32_t ip_fragmentOffset;
   u_int32_t udp_pduLen;
+
+  /* inner header decode */
+  int got_inner_IPV4;
+  struct in_addr dcd_inner_srcIP;
+  struct in_addr dcd_inner_dstIP;
+  u_int32_t dcd_inner_ipProtocol;
+  u_int32_t dcd_inner_ipTos;
+  u_int32_t ip_inner_fragmentOffset;
 
   /* ports */
   u_int32_t inputPortFormat;
@@ -200,6 +209,10 @@ typedef struct _SFSample {
 
   /* classification */
   pm_class_t class;
+#if defined (WITH_NDPI)
+  pm_class2_t ndpi_class;
+#endif 
+
   pm_id_t tag;
   pm_id_t tag2;
 
@@ -300,6 +313,7 @@ EXT void reset_ip4(struct packet_ptrs *);
 EXT void reset_ip6(struct packet_ptrs *);
 EXT void SF_notify_malf_packet(short int, char *, struct sockaddr *);
 EXT int SF_find_id(struct id_table *, struct packet_ptrs *, pm_id_t *, pm_id_t *);
+EXT void SF_compute_once();
 
 EXT char *getPointer(SFSample *);
 EXT u_int32_t getData32(SFSample *);
@@ -307,6 +321,7 @@ EXT u_int32_t getData32_nobswap(SFSample *);
 EXT u_int64_t getData64(SFSample *);
 EXT u_int32_t getAddress(SFSample *, SFLAddress *);
 EXT void skipBytes(SFSample *, int);
+EXT int skipBytesAndCheck(SFSample *, int);
 EXT int lengthCheck(SFSample *, u_char *, int);
 
 //EXT char fifo_name[256];
@@ -320,8 +335,8 @@ EXT void process_SFv5_packet(SFSample *, struct packet_ptrs_vector *, struct plu
 EXT void process_SF_raw_packet(SFSample *, struct packet_ptrs_vector *, struct plugin_requests *, struct sockaddr *);
 EXT void readv2v4FlowSample(SFSample *, struct packet_ptrs_vector *, struct plugin_requests *);
 EXT void readv5FlowSample(SFSample *, int, struct packet_ptrs_vector *, struct plugin_requests *, int);
-EXT void readv2v4CountersSample(SFSample *);
-EXT void readv5CountersSample(SFSample *, int, struct packet_ptrs_vector *, struct plugin_requests *);
+EXT void readv2v4CountersSample(SFSample *, struct packet_ptrs_vector *);
+EXT void readv5CountersSample(SFSample *, int, struct packet_ptrs_vector *);
 EXT void finalizeSample(SFSample *, struct packet_ptrs_vector *, struct plugin_requests *);
 EXT void InterSampleCleanup(SFSample *);
 EXT void decodeMpls(SFSample *);
@@ -330,6 +345,7 @@ EXT void decodeLinkLayer(SFSample *);
 EXT void decodeIPLayer4(SFSample *, u_char *, u_int32_t);
 EXT void decodeIPV4(SFSample *);
 EXT void decodeIPV6(SFSample *);
+EXT void decodeIPV4_inner(SFSample *, u_char *);
 EXT void readExtendedSwitch(SFSample *);
 EXT void readExtendedRouter(SFSample *);
 EXT void readExtendedGateway_v2(SFSample *);
@@ -350,7 +366,7 @@ EXT void readFlowSample_ethernet(SFSample *);
 EXT void readFlowSample_IPv4(SFSample *);
 EXT void readFlowSample_IPv6(SFSample *);
 
-EXT int sf_cnt_log_msg(struct bgp_peer *, SFSample *, u_int32_t, char *, int, u_int32_t);
+EXT int sf_cnt_log_msg(struct bgp_peer *, SFSample *, int, u_int32_t, char *, int, u_int32_t);
 EXT int readCounters_generic(struct bgp_peer *, SFSample *, char *, int, void *);
 EXT int readCounters_ethernet(struct bgp_peer *, SFSample *, char *, int, void *);
 EXT int readCounters_vlan(struct bgp_peer *, SFSample *, char *, int, void *);
